@@ -1,0 +1,627 @@
+
+```{r include=FALSE}
+# Libraries
+library(ape)
+library(janitor)
+library(ggtree)
+library(tidytree)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(textshape)
+library(purrr)
+library(ggplot2)
+library(ggsci)
+library(devEMF)
+library(colorRamp2)
+library(ggrepel)
+library(KEGGREST)
+library(tibble)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(GGally)
+library(microeco)
+library(file2meco)
+library(nloptr)
+library(lme4)
+library(pbkrtest)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(ComplexHeatmap)
+
+
+# Functions
+# save.emf: saves plots in EMF format
+save.emf = function(plot, name = "plot.path.name.emf", height, width) {
+  emf(file = name, width = width, height = height)
+  print(plot)
+  dev.off()
+}
+
+
+clean_sample_names <- function(strings) {
+  # Remove the beginning pattern
+  strings <- gsub("^\\d{5}_ID\\d{4}_\\d+[.-]Pool\\d[._-]", "", strings)
+  
+  # Remove the ending pattern
+  strings <- gsub("_S\\d{3}_L\\d{3}\\.kraken2\\.report$", "", strings)
+  # Replace . with _
+  strings <- gsub("\\-", "_", strings)
+  return(strings)
+}
+
+```
+
+```{r}
+### ANALYSIS OF CLASSIFIED VS UNCLASSIFIED READS FOR BACTERIA, ARCHAEA AND EUKARYA BASED ON MATRIX OF ORIGIN
+read_assignment= data.frame(
+  row.names = c("Unclassified", "Bacteria", "Archaea", "Eukaryotes"),
+  AV9 = c(40.44, 59.19, 0.22, 0.15),
+  AV10 = c(27.95, 71.76, 0.16, 0.13),
+  A11 = c(33.41, 66.21, 0.24, 0.14),
+  AV13 = c(41.8, 57.74, 0.28, 0.18),
+  AV14 = c(48.94, 49.94, 0.89, 0.23),
+  AV15 = c(44.65, 54.85, 0.34, 0.16),
+  AV16 = c(49.42, 50.01, 0.35, 0.22),
+  AV17 = c(41.7, 57.79, 0.31, 0.20),
+  AV18 = c(34.68, 64.92, 0.25, 0.15),
+  AV19 = c(46.01, 52.81, 1.01, 0.17),
+  Lago_Ledro_sed = c(32.98, 66.44, 0.38, 0.20),
+  L_Ampola_sed = c(33.52, 65.85, 0.39, 0.24),
+  Mga_Stigol_sedim = c(31.06, 68.32, 0.46, 0.16),
+  Bocca_Giumela_sedim = c(30.89, 68.42, 0.43, 0.26),
+  Mga_Bestana_sed = c(27.11, 72.44, 0.23, 0.22),
+  Mga_tenno_sed = c(30.17, 69.35, 0.24, 0.24),
+  Torb_Lomasona_sed = c(36.55, 62.3, 0.90, 0.25),
+  Lomasona_1_sed = c(32.01, 67.18, 0.56, 0.25),
+  Fiave1_sed = c(37.15, 61.42, 1.18, 0.25),
+  Fiave2_sed = c(32.85, 66.54, 0.36, 0.25),
+  Fiave3_sed = c(28.78, 70.46, 0.46, 0.30),
+  Psso_Duron_sedim = c(35.16, 63.83, 0.75, 0.26),
+  Mga_Stabio_sed = c(50.44, 47.86, 1.44, 0.26),
+  Mga_Movlina_sedim = c(32.92, 66.4, 0.45, 0.23),
+  Mga_Nambi_sedim = c(34.99, 64.52, 0.29, 0.20),
+  L_Nembia_sed = c(36.14, 63.47, 0.21, 0.18),
+  Lago_Valagola_sed = c(30.00, 69.27, 0.49, 0.24),
+  Mga_Cioca_sed = c(32.24, 67.04, 0.53, 0.19),
+  LL_P12 = c(50.86, 48.83, 0.20, 0.11),
+  AV4 = c(51.99, 47.37, 0.41, 0.23),
+  AV12 = c(45.72, 53.71, 0.39, 0.18),
+  Lago_Tenno_sed = c(34.61, 64.43, 0.72, 0.24),
+  AV2 = c(41.04, 58.54, 0.29, 0.13),
+  AV3 = c(44.59, 54.96, 0.27, 0.18),
+  AV5 = c(45.08, 54.46, 0.32, 0.14),
+  AV6 = c(44.33, 55.32, 0.24, 0.11),
+  AV7 = c(40.45, 59.22, 0.21, 0.12),
+  AV8 = c(25.34, 74.39, 0.18, 0.09)
+)
+
+read_assignment=data.frame(t(read_assignment))
+
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'A11', 'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","A11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+read_assignment$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), row.names(read_assignment)), 'water', 'sediment'))
+read_assignment$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), row.names(read_assignment)),"L-SLs","SWB-PBs"))
+#read_assignment$shortcode <- labels <- c("MB", "MT", "LT", "TL", "L1", "TF1", "TF2", "TF3","LV", "MC", "LL", "LA", "MST", "BG", "MB", "MT", "TL", "L1", "TF1", "TF2", "TF3", "PD", "MS", "MM", "MN", "LN", "LV", "MC", "LL", "MN", "LN", "LT", "LA", "MM", "PD", "MS", "BG", "MST")
+
+read_assignment$Unclassified=as.numeric(read_assignment$Unclassified)
+read_assignment$Bacteria=as.numeric(read_assignment$Bacteria)
+read_assignment$Archaea=as.numeric(read_assignment$Archaea)
+read_assignment$Eukaryotes=as.numeric(read_assignment$Eukaryotes)
+
+paired_data_w <- subset(read_assignment,matrix=="water")
+paired_data_s = subset(read_assignment, matrix=="sediment")
+
+# Perform Wilcoxon signed-rank test for paired samples
+wilcox.test(paired_data_w$Archaea, paired_data_s$Archaea, paired = TRUE, alternative = "two.sided")
+wilcox.test(paired_data_w$Bacteria, paired_data_s$Bacteria, paired = TRUE, alternative = "two.sided")
+wilcox.test(paired_data_w$Unclassified, paired_data_s$Unclassified, paired = TRUE, alternative = "two.sided")
+wilcox.test(paired_data_w$Eukaryotes, paired_data_s$Eukaryotes, paired = TRUE, alternative = "two.sided")
+
+# Convert data from wide to long format
+read_assignment_long <- read_assignment %>%
+  pivot_longer(cols = -c("matrix","habtype_new"), names_to = "Variable", values_to = "Value")
+read_assignment_long$Value=as.numeric(read_assignment_long$Value)
+
+# Create the boxplot
+ggplot(read_assignment_long, aes(x = Variable, y = Value, fill = matrix)) +
+  geom_boxplot(position = position_dodge(width = 0.8), width = 0.6) +  # Dodge positions the boxes side by side
+  theme_minimal() +
+  labs(title = "Paired Boxplots of Kingdoms Across Matrices",
+       x = "Kingdom", y = "Abundance") +
+  scale_fill_manual(values = c("water" = "skyblue", "sediment" = "tomato")) +  # Custom colors
+  theme(legend.position = "top")
+
+# Focus on archaea and euk
+read_assignment=read_assignment[,-c(1,2)]
+# Convert data from wide to long format
+read_assignment_long <- read_assignment %>%
+  pivot_longer(cols = -c("matrix","habtype_new"), names_to = "Variable", values_to = "Value")
+read_assignment_long$Value=as.numeric(read_assignment_long$Value)
+
+# Create the boxplot
+ggplot(read_assignment_long, aes(x = Variable, y = Value, fill = matrix)) +
+  geom_boxplot(position = position_dodge(width = 0.8), width = 0.6) +  # Dodge positions the boxes side by side
+  theme_minimal() +
+  labs(title = "Paired Boxplots of Kingdoms Across Matrices",
+       x = "Kingdom", y = "Abundance") +
+  scale_fill_manual(values = c("water" = "skyblue", "sediment" = "tomato")) +  # Custom colors
+  theme(legend.position = "top")
+```
+
+#### TAXONOMIC ANALYSIS
+#### Bacteria
+```{r}
+# Load: BRACKEN ABUNDANCE MATRIX
+mult_B <- mpa2meco("TableS1_Bacteria_Taxonomy.csv", use_level = 's__', sep=",")
+
+# Clean sample names
+mult_B$sample_table$SampleID = clean_sample_names(mult_B$sample_table$SampleID)
+mult_B$sample_table$Group = clean_sample_names(mult_B$sample_table$Group)
+
+# Add MATRIX and PHYSIOGRAPHIC GROUP (habtype_new) variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("MB", "MT", "LT", "TL", "L1", "TF1", "TF2", "TF3","LV", "MC", "LL", "LA", "MST", "BG", "MB", "MT", "TL", "L1", "TF1", "TF2", "TF3", "PD", "MS", "MM", "MN", "LN", "LV", "MC", "LL", "MN", "LN", "LT", "LA", "MM", "PD", "MS", "BG", "MST")
+
+# Check minimum read depth
+colSums(mult_B$otu_table)
+
+# Calculate abundances
+mult_B$cal_abund()
+
+# Number of bacterial species
+num_bacterial_species <- nrow(mult_B$otu_table)
+cat("Number of bacterial species detected:", num_bacterial_species, "\n")
+cat("Number of phyla detected:",length(unique(mult_B$otu_table$Phylum)), "\n")
+```
+
+```{r}
+# Filter out low-prevalence species
+species_prevalence <- rowSums(mult_B$otu_table > 0)  # Count the number of samples each species appears in
+
+# Create the data frame
+species_prevalence_df <- data.frame(
+  Species = names(species_prevalence), 
+  Prevalence = species_prevalence
+)
+
+# Set prevalence threshold, i.e. minimal number of samples a species should be found in
+prevalence_threshold <- 2
+filtered_otu_table <- mult_B$otu_table[species_prevalence >= prevalence_threshold, ]
+
+# Update the dataset with the filtered OTU table
+mult_B$otu_table <- filtered_otu_table
+num_bacterial_species <- nrow(mult_B$otu_table)
+cat("Number of bacterial species detected:", num_bacterial_species, "\n")
+```
+
+```{r}
+# Rarefaction
+library(mecodev)
+mult_B$tidy_dataset()
+
+# trans_rarefy class
+#t1 <- trans_rarefy$new(mult_B, alphadiv = "Observed", depth = c(0, 10, 50, 500, 1000, 2000, 5000, 8000, 10000, 12000, 50000, 100000, 500000, 1000000, 2000000))
+t1 <- trans_rarefy$new(mult_B, alphadiv = "Observed", depth = c(0, 10, 50, 500, 1000, 2000, 5000, 8000, 10000, 12000, 50000, 100000, 500000, 1000000, 5000000, 10000000))
+raref_bac = t1$plot_rarefy(color = "matrix", show_point = FALSE, add_fitting = FALSE)
+
+raref_bac <- raref_bac +
+  theme(
+    axis.title.x = element_text(size = 18), # x-axis title
+    axis.title.y = element_text(size = 18), # y-axis title
+    axis.text.x = element_text(size = 12),  # x-axis text
+    axis.text.y = element_text(size = 12)) 
+ 
+```
+
+```{r}
+# Alpha diversity indices 
+mult_B$cal_alphadiv(PD = FALSE)
+
+# Shannon index 
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Shannon")
+paired_test_shannon=t1$plot_alpha(measure = "Shannon")
+
+# Chao1 index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Chao1")
+paired_test_observed=t1$plot_alpha(measure = "Chao1")
+
+# Inverse Simpson index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "InvSimpson")
+paired_test_simpson=t1$plot_alpha(measure = "InvSimpson")
+```
+
+```{r}
+# Bray-Curtis distance
+# Calculate beta diversity
+mult_B$cal_betadiv()
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+
+# PCA Bray-Curtis
+t1$cal_ordination(method = "PCoA") 
+class(t1$res_ordination)
+
+# Plot ordination
+PCOA =t1$plot_ordination(plot_color = "matrix", plot_shape = "habtype_new", plot_type = c("point","ellipse")) + geom_text_repel(aes(label = mult_B$sample_table$shortcode), vjust = -1, hjust = 0.5, show.legend = FALSE) + labs(shape = "Physiographic group") 
+```
+
+```{r}
+#PerMANOVA(Anderson 2001) can be applied to the differential test of distances among groups via the cal_manova function developed based on the adonis2 function of vegan package.
+
+# variable: matrix
+t1 <- trans_beta$new(dataset = mult_B, group = "matrix", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: habtype
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: matrix + habtype
+t1$cal_manova(manova_all = FALSE, group = "matrix", by_group = "habtype_new")
+t1$res_manova
+```
+
+```{r}
+### PERMDISP
+# Extract otu_table and sample_table
+otu_df <- as.data.frame(mult_B$otu_table)
+
+# Transpose the otu_table to match sample_table structure
+otu_df_t <- as.data.frame(t(otu_df[1:105587,]))
+otu_df_t$sample=rownames(otu_df_t)
+
+# Merge the dataframes on SampleID
+merged_df <- merge(metadata_sel, otu_df_t, by = "sample")
+
+library(vegan)
+
+# Compute Bray-Curtis distances from OTU data
+d <- vegdist(merged_df[, 7:105593], method = "bray")
+
+# Plot results
+bd_bac=betadisper(
+d,
+merged_df$habtype_new_m,
+type = c("centroid"),
+bias.adjust = FALSE,
+sqrt.dist = FALSE,
+add = FALSE
+)
+plot(bd_bac)
+adonis2(dist(bd$distances) ~ merged_df$matrix)
+```
+
+```{r}
+# Community composition bar plot for relative abundance visualization
+# 500 most abundant species
+t1 <- trans_abund$new(dataset = mult_B, taxrank = "Species", ntaxa = 500)
+ t1$plot_bar(x_axis_name="shortcode",others_color = "darkgrey", facet = c("habtype_new", "matrix"), xtext_keep = TRUE, legend_text_italic = FALSE, barwidth = 1, xtext_angle =30) + theme(strip.text.x.top = element_text(angle = 0), axis.text.x = element_text(angle = 90), legend.position = "none") 
+
+# 20 most abundant phyla
+ t1 <- trans_abund$new(dataset = mult_B, taxrank = "Phylum", ntaxa = 20)
+compositional_bar = t1$plot_bar(x_axis_name="shortcode",others_color = "darkgrey", facet = c("habtype_new", "matrix"), xtext_keep = TRUE, legend_text_italic = FALSE, barwidth = 1, xtext_angle =30) + theme(strip.text.x.top = element_text(angle = 0), axis.text.x = element_text(angle = 90), legend.position = "right") 
+```
+
+#### Archaea
+```{r}
+# Bracken: computes the abundance of species in DNA sequences from a metagenomics sample
+# Load
+mult_B <- mpa2meco("TableS2_Archaea_Taxonomy.csv", use_level = 's__', sep=",")
+
+# Clean sample names
+mult_B$sample_table$SampleID = clean_sample_names(mult_B$sample_table$SampleID)
+mult_B$sample_table$Group = clean_sample_names(mult_B$sample_table$Group)
+
+# Add variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("MB", "MT", "LT", "TL", "L1", "TF1", "TF2", "TF3","LV", "MC", "LL", "LA", "MST", "BG", "MB", "MT", "TL", "L1", "TF1", "TF2", "TF3", "PD", "MS", "MM", "MN", "LN", "LV", "MC", "LL", "MN", "LN", "LT", "LA", "MM", "PD", "MS", "BG", "MST")
+
+# Check minimum read depth
+colSums(mult_B$otu_table)
+
+# Rarefy
+# Calculate abundances
+mult_B$cal_abund()
+
+num_archaeal_species <- nrow(mult_B$otu_table)
+cat("Number of archaeal species detected:", num_archaeal_species, "\n")
+
+```
+
+```{r}
+# Filter out species that are not present in 2 or more samples 
+species_prevalence <- rowSums(mult_B$otu_table > 0)  # Count the number of samples each species appears in
+
+# Create the data frame
+species_prevalence_df <- data.frame(
+  Species = names(species_prevalence), 
+  Prevalence = species_prevalence
+)
+
+# Filter out low-prevalence species
+prevalence_threshold <- 2
+filtered_otu_table <- mult_B$otu_table[species_prevalence >= prevalence_threshold, ]
+
+# Update the dataset with the filtered OTU table
+mult_B$otu_table <- filtered_otu_table
+num_archaeal_species <- nrow(mult_B$otu_table)
+cat("Number of archaeal species detected:", num_archaeal_species, "\n")
+```
+
+```{r}
+# Rarefaction
+library(mecodev)
+mult_B$tidy_dataset()
+
+t1 <- trans_rarefy$new(mult_B, alphadiv = "Observed", depth = c(0, 10, 50, 500, 1000, 2000, 5000, 8000, 10000, 12000, 50000))
+rarefy_arc = t1$plot_rarefy(color = "matrix", show_point = FALSE, add_fitting = FALSE)
+#16391 min seq depth 
+# Modify font size and title
+rarefy_arc <- rarefy_arc +
+  theme(
+    axis.title.x = element_text(size = 18), # x-axis title
+    axis.title.y = element_text(size = 18), # y-axis title
+    axis.text.x = element_text(size = 14),  # x-axis text
+    axis.text.y = element_text(size = 15)) 
+```
+
+```{r}
+# Alpha diversity
+mult_B$cal_alphadiv(PD = FALSE)
+
+# Shannon Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Shannon")
+
+# Chao1 Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Chao1")
+
+# Inverse Simpson Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Simpson")
+paired_test_simpson=t1$plot_alpha(measure = "InvSimpson")
+```
+
+```{r}
+# Bray-Curtis distance
+# Calculate beta diversity
+mult_B$cal_betadiv()
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+
+# PCA Bray-Curtis
+t1$cal_ordination(method = "PCoA")
+class(t1$res_ordination)
+
+# Plot ordination
+PCOA =t1$plot_ordination(plot_color = "matrix", plot_shape = "habtype_new", plot_type = c("point","ellipse")) + geom_text_repel(aes(label = mult_B$sample_table$shortcode), vjust = -1, hjust = 0.5, show.legend = FALSE) + labs(shape = "Physiographic group") 
+```
+
+```{r}
+#PerMANOVA(Anderson 2001) can be applied to the differential test of distances among groups via the cal_manova function developed based on the adonis2 function of vegan package.
+
+# variable: matrix
+t1 <- trans_beta$new(dataset = mult_B, group = "matrix", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: habtype
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: matrix + habtype
+t1$cal_manova(manova_all = FALSE, group = "matrix", by_group = "habtype_new")
+t1$res_manova
+```
+
+```{r}
+### PERMDISP
+# Extract otu_table and sample_table
+otu_df <- as.data.frame(mult_B$otu_table)
+
+# Transpose the otu_table to match sample_table structure
+otu_df_t <- as.data.frame(t(otu_df))
+otu_df_t$sample=rownames(otu_df_t)
+
+# Merge the dataframes on SampleID
+merged_df <- merge(metadata_sel, otu_df_t, by = "sample")
+
+library(vegan)
+# Compute Bray-Curtis distances from OTU data
+d <- vegdist(merged_df[, 7:5533], method = "bray")
+# Plot 
+bd_arc=betadisper(
+d,
+merged_df$habtype_new_m,
+type = c("centroid"),
+bias.adjust = FALSE,
+sqrt.dist = FALSE,
+add = FALSE
+)
+plot(bd_arc)
+adonis2(dist(bd$distances) ~ merged_df$matrix)
+```
+
+```{r}
+# Community composition barplot for visualization of relative abundance 
+# 20 archaeal phyla
+t1 <- trans_abund$new(dataset = mult_B, taxrank = "Phylum", ntaxa = 20)
+t1$plot_bar(x_axis_name="shortcode",others_color = "darkgrey", facet = c("habtype_new", "matrix"), xtext_keep = TRUE, legend_text_italic = FALSE, barwidth = 1, xtext_angle =30) + theme(strip.text.x.top = element_text(angle = 0), axis.text.x = element_text(angle = 90), legend.position = "right") 
+```
+
+#### Eukaryota
+```{r}
+# Bracken: computes the abundance of species in DNA sequences from a metagenomics sample
+# Load
+mult_B <- mpa2meco("TableS3_Eukarya_Taxonomy.csv", sep = ",", use_level = 's__')
+
+# Clean sample names
+mult_B$sample_table$SampleID = clean_sample_names(mult_B$sample_table$SampleID)
+mult_B$sample_table$Group = clean_sample_names(mult_B$sample_table$Group)
+
+# Add variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("TF1", "LT","MT","TL","LV","MB","MC","MST","L1","TF3","LA","L1","TF2","MB","LL","MT","BG","TF1","TL","TF2","MS","TF3","LL","LN","MM","LV","PD","MN","MC","LA","MS","PD","BG","MST","LN","MN","LT","MM")
+
+# Check minimum read depth
+#colSums(mult_B$otu_table)
+
+# Rarefy
+# Calculate abundances
+mult_B$cal_abund()
+
+num_eukaryotic_species <- nrow(mult_B$otu_table)
+cat("Number of eukaryotic species detected:", num_eukaryotic_species, "\n")
+```
+
+```{r}
+# Filter out low-prevalence species
+species_prevalence <- rowSums(mult_B$otu_table > 0)  # Count the number of samples each species appears in
+
+# Create the data frame
+species_prevalence_df <- data.frame(
+  Species = names(species_prevalence), 
+  Prevalence = species_prevalence
+)
+
+prevalence_threshold <- 2
+filtered_otu_table <- mult_B$otu_table[species_prevalence >= prevalence_threshold, ]
+
+# Update the dataset with the filtered OTU table
+mult_B$otu_table <- filtered_otu_table
+
+num_eukaryotic_species <- nrow(mult_B$otu_table)
+cat("Number of eukaryotic species detected:", num_eukaryotic_species, "\n")
+```
+
+```{r}
+# Rarefaction
+library(mecodev)
+mult_B$tidy_dataset()
+
+# trans_rarefy class
+t1 <- trans_rarefy$new(mult_B, alphadiv = "Observed", depth = c(0, 10, 50, 500, 1000, 2000, 5000))
+raref_euk=t1$plot_rarefy(color = "matrix", show_point = FALSE, add_fitting = FALSE)
+
+# Modify font size and title
+raref_euk <- raref_euk +
+  theme(
+    axis.title.x = element_text(size = 18), # x-axis title
+    axis.title.y = element_text(size = 18), # y-axis title
+    axis.text.x = element_text(size = 15),  # x-axis text
+    axis.text.y = element_text(size = 15)) 
+```
+
+```{r}
+# Alpha diversity
+mult_B$cal_alphadiv(PD = FALSE)
+
+# Shannon Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Shannon")
+
+# Chao1 Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Chao1")
+
+# Inverse Simpson Index
+t1 <- trans_alpha$new(dataset = mult_B, group = "matrix", by_group = "habtype_new")
+t1$cal_diff(method = "wilcox")
+t1$plot_alpha(measure = "Simpson")
+paired_test_simpson=t1$plot_alpha(measure = "InvSimpson")
+```
+
+```{r}
+# Bray-Curtis distance
+# Calculate beta diversity
+mult_B$cal_betadiv()
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+
+# PCA Bray-Curtis
+t1$cal_ordination(method = "PCoA") # t1$res_ordination is the ordination result list
+class(t1$res_ordination)
+
+# Plot ordination
+PCOA =t1$plot_ordination(plot_color = "matrix", plot_shape = "habtype_new", plot_type = c("point","ellipse")) + geom_text_repel(aes(label = mult_B$sample_table$shortcode), vjust = -1, hjust = 0.5, show.legend = FALSE) + labs(shape = "Physiographic group") 
+```
+
+```{r}
+#PerMANOVA(Anderson 2001) can be applied to the differential test of distances among groups via the cal_manova function developed based on the adonis2 function of vegan package.
+
+# variable: matrix
+t1 <- trans_beta$new(dataset = mult_B, group = "matrix", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: habtype
+t1 <- trans_beta$new(dataset = mult_B, group = "habtype_new", measure = "bray")
+t1$cal_manova(manova_all = FALSE)
+t1$res_manova
+
+# variable: matrix + habtype
+t1$cal_manova(manova_all = FALSE, group = "matrix", by_group = "habtype_new")
+t1$res_manova
+```
+
+```{r}
+### PERMDISP
+# Extract otu_table and sample_table
+otu_df <- as.data.frame(mult_B$otu_table)
+
+# Transpose the otu_table to match sample_table structure
+otu_df_t <- as.data.frame(t(otu_df))
+otu_df_t$sample=rownames(otu_df_t)
+
+# Merge the dataframes on SampleID
+merged_df <- merge(metadata_sel, otu_df_t, by = "sample")
+
+library(vegan)
+# Compute Bray-Curtis distances from OTU data
+d <- vegdist(merged_df[, 9:151], method = "bray")
+# Plot
+bd_euk=betadisper(
+d,
+merged_df$habtype_new_m,
+type = c("centroid"),
+bias.adjust = FALSE,
+sqrt.dist = FALSE,
+add = FALSE
+)
+plot(bd_euk)
+adonis2(dist(bd_euk$distances) ~ merged_df$matrix)
+```
+
+```{r}
+# Community composition barplot
+t1 <- trans_abund$new(dataset = mult_B, taxrank = "Phylum", ntaxa = 20)
+t1$plot_bar(x_axis_name="shortcode", facet = c("habtype_new", "matrix"), xtext_keep = TRUE, legend_text_italic = FALSE, barwidth = 1, xtext_angle =30) + theme(strip.text.x.top = element_text(angle = 0), axis.text.x = element_text(angle = 90), legend.position = "right") 
+```
+

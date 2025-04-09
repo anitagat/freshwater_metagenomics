@@ -1,0 +1,890 @@
+```{r include=FALSE}
+# Libraries
+library(ape)
+library(janitor)
+library(ggtree)
+library(tidytree)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(textshape)
+library(purrr)
+library(ggplot2)
+library(ggsci)
+library(devEMF)
+library(colorRamp2)
+library(ggrepel)
+library(KEGGREST)
+library(tibble)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(GGally)
+library(microeco)
+library(file2meco)
+library(nloptr)
+library(lme4)
+library(pbkrtest)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(ComplexHeatmap)
+
+# Set directory
+
+# Functions
+# save.emf: saves plots in EMF format
+save.emf = function(plot, name = "plot.path.name.emf", height, width) {
+  emf(file = name, width = width, height = height)
+  print(plot)
+  dev.off()
+}
+```
+
+```{r}
+# Existing KEGG Modules extracted from https://www.genome.jp/brite/ko00002
+modules = c(
+  #Carbon metabolism
+  "M00001", "M00002", "M00003","M00307","M00009","M00010","M00011","M00004",
+"M00006","M00007", "M00580", "M00005","M00008","M00308","M00633", "M00309", 
+
+# Other carbohydrate metabolism
+"M00014", "M00630", "M00631", "M00061", "M00081", "M00632", "M00552", "M00129", "M00114", "M00550", "M00854", "M00855", 
+"M00565", "M00549", "M00554", "M00892", "M00909", "M00761", "M00923", "M00922", "M00793", "M00012", "M00373", "M00740", 
+"M00532", "M00013", "M00741", "M00982", "M00968", "M00130", "M00131", "M00132", 
+
+# Carbon fixation
+  "M00165", "M00168", "M00169", "M00172", "M00171", "M00170", "M00173", 
+  "M00376", "M00375", "M00374", "M00377", "M00579", "M00620", 
+  
+  # Methane metabolism
+  "M00567", "M00357", "M00356", "M00563", "M00358", "M00608", "M00174", 
+  "M00346", "M00345", "M00344", "M00378", "M00935", "M00422",
+
+# Nitrogen metabolism
+  "M00175", "M00531", "M00530", "M00529", "M00528", "M00804", "M00973", 
+  
+  # Sulfur metabolism
+  "M00987", "M00176", "M00596", "M00595", "M00984", "M00986", "M00985", 
+  
+  # Photosynthesis
+  "M00161", "M00163", "M00597", "M00598", 
+  
+  # ATP synthesis
+  "M00144", "M00145", "M00142", "M00143", "M00146", "M00147", "M00149", 
+  "M00150", "M00148", "M00162", "M00151", "M00152", "M00154", "M00155", 
+  "M00153", "M00417", "M00416", "M00156", "M00157", "M00158", "M00159", "M00160",
+
+ # Fatty acid metabolism
+  "M00082", "M00083", "M00873", "M00874", "M00085", "M00415", "M00086", 
+  "M00087", "M00861", "M00885", "M00886", "M00887", 
+  
+  # Sterol biosynthesis
+  "M00101", "M00102", "M00917", "M00103", "M00104", "M00106", "M00862", 
+  "M00107", "M00108", "M00109", "M00110", "M00976", "M00977", 
+  
+  # Lipid metabolism
+  "M00088", "M00089", "M00098", "M00090", "M00091", "M00092", "M00093", 
+  "M00094", "M00066", "M00067", "M00099", "M00100", "M00113",
+
+# Serine and threonine metabolism
+  "M00020", "M00018", "M00621", "M00555", "M00974", "M00975", "M00033", "M00919", 
+  
+  # Cysteine and methionine metabolism
+  "M00021", "M00338", "M00609", "M00017", "M00034", "M00035", "M00368", 
+  
+  # Branched-chain amino acid metabolism
+  "M00019", "M00535", "M00570", "M00432", "M00036", 
+  
+  # Lysine metabolism
+  "M00016", "M00525", "M00526", "M00527", "M00030", "M00433", "M00031", "M00032", 
+  "M00956", "M00957", "M00960",
+
+ # Arginine and proline metabolism
+  "M00028", "M00763", "M00844", "M00845", "M00029", "M00978", "M00015", "M00970", 
+  "M00972", "M00047", "M00879", 
+  
+  # Polyamine biosynthesis
+  "M00133", "M00134", "M00135", "M00136", 
+  
+  # Histidine metabolism
+  "M00026", "M00045", 
+  
+  # Aromatic amino acid metabolism
+  "M00022", "M00023", "M00024", "M00910", "M00025", "M00040", "M00042", "M00043", 
+  "M00044", "M00533", "M00037", "M00936", "M00038", 
+  
+  # Other amino acid metabolism
+  "M00027", "M00369", "M00118", "M00947", "M00948", "M00949",
+
+ # Glycan biosynthesis
+  "M00055", "M00072", "M00073", "M00074", "M00075", "M00056", "M00872", "M00065", 
+  "M00983", "M00070", "M00071", "M00068", "M00069", 
+  
+  # Glycosaminoglycan metabolism
+  "M00057", "M00058", "M00059", "M00076", "M00077", "M00078", "M00079", 
+  
+  # Lipopolysaccharide metabolism
+  "M00060", "M00866", "M00867", "M00063", "M00064", 
+  
+  # Other polysaccharide metabolism
+  "M00888",
+
+ # Cofactor and vitamin metabolism
+  "M00127", "M00895", "M00896", "M00897", "M00898", "M00899", "M00125", "M00911", 
+  "M00124", "M00916", "M00115", "M00912", "M00810", "M00811", "M00622", "M00119", 
+  "M00913", "M00120", "M00914", "M00572", "M00123", "M00950", "M00573", "M00577", 
+  "M00881", "M00882", "M00883", "M00884", "M00126", "M00840", "M00841", "M00933", 
+  "M00112", "M00932", "M00931", "M00930", "M00116", "M00128", "M00117", "M00836", 
+  "M00122", "M00925", "M00924", "M00847", "M00926", "M00121", "M00868", "M00846", 
+  "M00141", "M00140", "M00988", "M00880", "M00843", "M00842",
+
+ # Terpenoid backbone biosynthesis
+  "M00095", "M00849", "M00096", "M00364", "M00365", "M00366", "M00367", 
+  
+  # Plant terpenoid biosynthesis
+  "M00097", "M00372", "M00371", "M00927", "M00928", "M00929", 
+  
+  # Macrolide biosynthesis
+  "M00773", "M00934", "M00774", "M00775", "M00776", "M00777", 
+  
+  # Enediyne biosynthesis
+  "M00824", "M00825", "M00826", "M00827", "M00828", "M00829", "M00830", 
+  "M00831", "M00832", "M00834", "M00833", 
+  
+  # Type II polyketide biosynthesis
+  "M00778", "M00779", "M00780", "M00823", "M00781", "M00782", "M00783", 
+  "M00784", 
+  
+  # Polyketide sugar unit biosynthesis
+  "M00794", "M00795", "M00796", "M00797", "M00798", "M00799", "M00800", 
+  "M00801", "M00802", "M00803",
+
+# Phytochemical compound biosynthesis
+  "M00039", "M00137", "M00940", "M00138", "M00941", "M00942", "M00966", 
+  "M00967", "M00962", "M00963", "M00964", "M00981", "M00979", "M00980", 
+  "M00965", "M00943", "M00944", "M00945", "M00946", "M00961", "M00370", 
+  "M00900", "M00971", "M00894", "M00953", "M00952", "M00902",
+  
+  # Beta-lactam biosynthesis
+  "M00672", "M00673", "M00675", "M00736", "M00674",
+  
+  # Other antibiotics biosynthesis
+  "M00877", "M00889", "M00815", "M00904", "M00787", "M00785", "M00848", 
+  "M00788", "M00819", "M00903", "M00890", "M00951", "M00969",
+  
+  # Fungal compounds biosynthesis
+  "M00661", "M00786", "M00937", "M00893", "M00891", "M00901",
+  
+  # Bacterial compounds biosynthesis
+  "M00814", "M00789", "M00790", "M00805", "M00808", "M00835", "M00837", 
+  "M00838", "M00921", "M00905", "M00876", "M00875", "M00918", "M00906",
+
+ # Phytochemical compound biosynthesis
+  "M00039", "M00137", "M00940", "M00138", "M00941", "M00942", "M00966", 
+  "M00967", "M00962", "M00963", "M00964", "M00981", "M00979", "M00980", 
+  "M00965", "M00943", "M00944", "M00945", "M00946", "M00961", "M00370", 
+  "M00900", "M00971", "M00894", "M00953", "M00952", "M00902",
+
+  # Beta-lactam biosynthesis
+  "M00672", "M00673", "M00675", "M00736", "M00674",
+  
+  # Other antibiotics biosynthesis
+  "M00877", "M00889", "M00815", "M00904", "M00787", "M00785", "M00848", 
+  "M00788", "M00819", "M00903", "M00890", "M00951", "M00969",
+  
+  # Fungal compounds biosynthesis
+  "M00661", "M00786", "M00937", "M00893", "M00891", "M00901",
+  
+  # Bacterial compounds biosynthesis
+  "M00814", "M00789", "M00790", "M00805", "M00808", "M00835", "M00837", 
+  "M00838", "M00921", "M00905", "M00876", "M00875", "M00918", "M00906",
+
+  # Aromatics degradation
+  "M00538", "M00537", "M00419", "M00547", "M00548", "M00551", "M00637", 
+  "M00568", "M00569", "M00539", "M00543", "M00544", "M00418", "M00541", 
+  "M00540", "M00534", "M00638", "M00624", "M00623", "M00636", "M00878", 
+  "M00545", "M00915",
+
+# Pathogenicity signatures
+  "M00852", "M00850", "M00542", "M00363", "M00853", "M00576", "M00856", 
+  "M00857", "M00575", "M00574", "M00564", "M00859", "M00860",
+
+  # Drug resistance
+  "M00851", "M00625", "M00627", "M00745", "M00651", "M00652", "M00704", 
+  "M00725", "M00726", "M00730", "M00744", "M00718", "M00639", "M00641", 
+  "M00642", "M00643", "M00769", "M00649", "M00696", "M00697", "M00698", 
+  "M00700", "M00702", "M00714", "M00705", "M00746",
+#Plant pathogenicity and symbiosis
+  "M00660","M00664",
+
+  # Metabolic capacity
+  "M00611", "M00612", "M00613", "M00614", "M00617", "M00618", "M00615", 
+  "M00616"
+)
+```
+
+```{r}
+# Prep data
+metadata = read.csv("/Users/macbook/Downloads/TableS9_Metadata.csv", sep=',', header=TRUE)
+
+# Functional analysis with KEGG Orthologs (KOs)
+KEGG_ko=read.table("/Users/macbook/Downloads/TableS7_KEGG_KO_abundance.tsv",header = TRUE, sep = "\t")
+KEGG_ko[1,1]="Unassigned"
+KEGG_ko=KEGG_ko[-1,]
+rownames(KEGG_ko) = KEGG_ko$X
+KEGG_ko=KEGG_ko[,-1]
+KEGG_ko.t = as.data.frame(t(KEGG_ko))
+
+# Functional analysis with modules 
+KEGG_module = read.table("/Users/macbook/Downloads/TableS8_KEGG_Module_abundance.tsv", header = TRUE, sep = "\t")
+KEGG_module[1,1]="Unassigned"
+#KEGG_module=KEGG_module[-1,]
+KEGG_module = KEGG_module[KEGG_module$KEGG.Module %in% modules, ]
+rownames(KEGG_module) = KEGG_module$KEGG.Module
+KEGG_module=KEGG_module[,-1]
+KEGG_module.t = as.data.frame(t(KEGG_module))
+
+```
+
+```{r}
+# Calculate Functional Diversity Indices on the KEGG KO matrix
+library(vegan)
+
+df = KEGG_ko.t # calculate on the annotations that you prefer 
+
+# Shannon Diversity
+shannon_div <- diversity(df, index = "shannon")
+
+# Simpson's Index
+simpson_div <- diversity(df, index = "simpson")
+
+# Inverse Simpson Index
+inverse_simpson <- diversity(df, index = "invsimpson")
+
+# Species (or gene) richness
+richness <- specnumber(df)
+
+# Pielou’s Evenness
+evenness <- shannon_div / log(richness)
+
+# Print results
+diversity_results <- data.frame(
+  sample = rownames(df),
+  Shannon = shannon_div,
+  Simpson = simpson_div,
+  Inverse_Simpson = inverse_simpson,
+  Richness = richness,
+  Evenness = evenness
+)
+
+diversity_results=left_join(diversity_results, metadata, by="sample")
+
+# Shannon
+shannon=ggplot(diversity_results, aes(x = matrix, y = Shannon, color = matrix)) +
+  geom_violin(draw_quantiles = c(0.5)) + geom_jitter()+
+  geom_text_repel(aes(x = matrix, y = Shannon, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 16)+ 
+  facet_wrap(~ habtype_new) +  # Facet by habtype_new
+  scale_color_manual(values = c("sediment" = "#49B192", "water" = "#DB6811")) +  
+    #scale_colour_manual(values = c("sediment" = "black", "water" = "black")) +
+  labs(x = "Matrix",
+       y = "Shannon Diversity") +
+  theme_classic2()+theme(legend.position = "top",axis.title.x = element_text(size=14),axis.title.y = element_text(size=14))
+
+# Inv Simpson
+invsimpson=ggplot(diversity_results, aes(x = matrix, y = Inverse_Simpson, color = matrix)) +
+  geom_violin(draw_quantiles = c(0.5)) + 
+  geom_text_repel(aes(x = matrix, y = Inverse_Simpson, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 38)+ 
+  facet_wrap(~ habtype_new) +  # Facet by habtype_new
+  scale_color_manual(values = c("sediment" = "#49B192", "water" = "#DB6811")) +  
+    #scale_colour_manual(values = c("sediment" = "black", "water" = "black")) +
+  labs(x = "Matrix",
+       y = " InvSimpson") +
+  theme_classic2()
+
+# Richness
+richness=ggplot(diversity_results, aes(x = matrix, y = Richness, color = matrix)) +
+  geom_violin(draw_quantiles = c(0.5)) + geom_jitter()+
+  geom_text_repel(aes(x = matrix, y = Richness, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 16)+ 
+  facet_wrap(~ habtype_new) +  # Facet by habtype_new
+  scale_color_manual(values = c("sediment" = "#49B192", "water" = "#DB6811")) +  
+    #scale_colour_manual(values = c("sediment" = "black", "water" = "black")) +
+  labs(x = "Matrix",
+       y = " Richness") +
+  theme_classic2()+theme(legend.position = "top",axis.title.x = element_text(size=14),axis.title.y = element_text(size=14))
+
+# Evenness
+evenness=ggplot(diversity_results, aes(x = matrix, y = Evenness, color = matrix)) +
+  geom_violin(draw_quantiles = c(0.5)) + geom_jitter()+
+  geom_text_repel(aes(x = matrix, y = Evenness, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 38)+ 
+  facet_wrap(~ habtype_new) +  # Facet by habtype_new
+  scale_color_manual(values = c("sediment" = "#49B192", "water" = "#DB6811")) +  
+    #scale_colour_manual(values = c("sediment" = "black", "water" = "black")) +
+  labs(x = "Matrix",
+       y = " Evenness") +
+  theme_classic2()
+
+# Wilcox test - Shannon Index
+wilcox.test(diversity_results$Shannon[diversity_results$habtype_new_m=="swb-pbs_w"],diversity_results$Shannon[diversity_results$habtype_new_m=="swb-pbs_s"],paired=TRUE)
+
+wilcox.test(diversity_results$Shannon[diversity_results$habtype_new_m=="swb-pbs_w"],diversity_results$Shannon[diversity_results$habtype_new_m=="l-sls_w"],paired=FALSE)
+
+wilcox.test(diversity_results$Shannon[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Shannon[diversity_results$habtype_new_m=="l-sls_w"],paired=TRUE)
+
+wilcox.test(diversity_results$Shannon[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Shannon[diversity_results$habtype_new_m=="swb-pbs_s"],paired=FALSE)
+
+wilcox.test(diversity_results$Shannon[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Shannon[diversity_results$habtype_new_m=="swb-pbs_w"],paired=FALSE)
+
+# Wilcox test - Richness
+wilcox.test(diversity_results$Richness[diversity_results$habtype_new_m=="swb-pbs_w"],diversity_results$Richness[diversity_results$habtype_new_m=="swb-pbs_s"],paired = TRUE)
+
+wilcox.test(diversity_results$Richness[diversity_results$habtype_new_m=="swb-pbs_w"],diversity_results$Richness[diversity_results$habtype_new_m=="l-sls_w"],paired=FALSE)
+
+wilcox.test(diversity_results$Richness[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Richness[diversity_results$habtype_new_m=="l-sls_w"],paired=TRUE)
+
+wilcox.test(diversity_results$Richness[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Richness[diversity_results$habtype_new_m=="swb-pbs_s"],paired=FALSE)
+
+wilcox.test(diversity_results$Richness[diversity_results$habtype_new_m=="l-sls_s"],diversity_results$Richness[diversity_results$habtype_new_m=="swb-pbs_w"],paired=FALSE)
+```
+
+```{r}
+# Perform PCA on KEGG KO data
+KEGG_ko.pca <- prcomp(KEGG_ko.t, scale. = FALSE)
+
+# Calculate variance proportions for PC1 and PC2
+vars = apply(KEGG_ko.pca$x, 2, var)
+prop_x = round(vars["PC1"] / sum(vars), 4) * 100
+prop_y = round(vars["PC2"] / sum(vars), 4) * 100
+x_axis_label = paste("PC1 ", "[", prop_x, "%]", sep = "")
+y_axis_label = paste("PC2 ", "[", prop_y, "%]", sep = "")
+
+# Convert PCA results to a data frame
+KEGG_ko.pca_df = as.data.frame(KEGG_ko.pca$x) 
+KEGG_ko.pca_df$sample = row.names(KEGG_ko.pca_df)
+
+# Join PCA results with metadata (assuming metadata is already defined)
+KEGG_ko.pca.ann = left_join(KEGG_ko.pca_df, metadata)
+
+# Remove NA values
+KEGG_ko.pca.ann.nona = na.omit(KEGG_ko.pca.ann)
+KEGG_ko.pca.ann.nona_w = subset(KEGG_ko.pca.ann.nona, matrix == 'water')
+KEGG_ko.pca.ann.nona_s = subset(KEGG_ko.pca.ann.nona, matrix == 'sediment')
+
+# Function to find convex hull
+find_hull <- function(df) {
+  df[chull(df$PC1, df$PC2), ]
+}
+
+# Calculate convex hull for each group
+hulls <- KEGG_ko.pca.ann.nona %>%
+  group_by(matrix) %>%
+  do(find_hull(.))
+
+kegg_pca = ggplot(KEGG_ko.pca.ann.nona) +
+  geom_point(aes(x = PC1, y = PC2, shape = habtype_new, colour = matrix, fill = matrix), size = 3) +
+  geom_text_repel(aes(x = PC1, y = PC2, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 38) +
+  
+  # Shaded Ellipses
+  stat_ellipse(aes(x = PC1, y = PC2, group = matrix, fill = matrix), 
+               geom = "polygon", alpha = 0.2, level = 0.95) +  # Shaded interior
+  
+  # Ellipse borders
+  stat_ellipse(aes(x = PC1, y = PC2, group = matrix, colour = matrix), 
+               level = 0.95, linetype = 1, size = 0.5) + 
+  
+  scale_fill_manual(values = c("#49B192", "#E17F35")) + 
+  scale_colour_manual(values = c("#49B192", "#E17F35")) +
+  scale_shape_manual(values = c(16, 17)) +  # Circle and triangle
+  
+  theme_minimal() +  # Keep clean background style
+  theme(
+    panel.grid.major = element_line(colour = "gray85"),  
+    panel.grid.minor = element_blank(),  
+    panel.background = element_rect(fill = "white", colour = "gray80"),  
+    legend.key = element_rect(fill = "white", colour = "white")  
+  ) +
+  theme_minimal() +  
+  theme(
+    panel.grid.major = element_line(colour = "white"),  # Light gray gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines for clarity
+    panel.background = element_rect(fill = "grey95", colour = "white"),  # Subtle border
+    legend.key = element_rect(fill = "white", colour = "white")  # White legend background
+  ) +
+  labs(x = x_axis_label, y = y_axis_label, colour = "matrix", shape = "Physiographic group")
+kegg_pca
+
+kegg_pca_habtype = ggplot(KEGG_ko.pca.ann.nona) +
+  geom_point(aes(x = PC1, y = PC2, shape = matrix, colour = habtype, fill = matrix), size = 3) +
+  geom_text_repel(aes(x = PC1, y = PC2, label = shortcode, colour = habtype), show.legend = FALSE, size = 3, max.overlaps = 38) +
+  
+  theme_minimal() +  # Keep clean background style
+  theme(
+    panel.grid.major = element_line(colour = "gray85"),  
+    panel.grid.minor = element_blank(),  
+    panel.background = element_rect(fill = "white", colour = "gray80"),  
+    legend.key = element_rect(fill = "white", colour = "white")  
+  ) +
+  theme_minimal() +  
+  theme(
+    panel.grid.major = element_line(colour = "white"),  # Light gray gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines for clarity
+    panel.background = element_rect(fill = "grey95", colour = "white"),  # Subtle border
+    legend.key = element_rect(fill = "white", colour = "white")  # White legend background
+  ) +
+  labs(x = x_axis_label, y = y_axis_label, colour = "matrix", shape = "Physiographic group")
+kegg_pca_habtype
+```
+
+```{r}
+# Perform PCA on Module data
+KEGG_MOD.pca <- prcomp(KEGG_module.t, scale. = FALSE)
+
+# Calculate variance proportions for PC1 and PC2
+vars = apply(KEGG_MOD.pca$x, 2, var)
+prop_x = round(vars["PC1"] / sum(vars), 4) * 100
+prop_y = round(vars["PC2"] / sum(vars), 4) * 100
+x_axis_label = paste("PC1 ", "[", prop_x, "%]", sep = "")
+y_axis_label = paste("PC2 ", "[", prop_y, "%]", sep = "")
+
+# Convert PCA results to a data frame
+KEGG_MOD.pca_df = as.data.frame(KEGG_MOD.pca$x) 
+KEGG_MOD.pca_df$sample = row.names(KEGG_MOD.pca_df)
+
+# Join PCA results with metadata (assuming metadata is already defined)
+KEGG_MOD.pca.ann = left_join(KEGG_MOD.pca_df, metadata)
+
+# Remove NA values
+KEGG_MOD.pca.ann.nona = na.omit(KEGG_MOD.pca.ann)
+KEGG_MOD.pca.ann.nona_w = subset(KEGG_MOD.pca.ann.nona, matrix == 'water')
+KEGG_MOD.pca.ann.nona_s = subset(KEGG_MOD.pca.ann.nona, matrix == 'sediment')
+
+# Function to find convex hull
+find_hull <- function(df) {
+  df[chull(df$PC1, df$PC2), ]
+}
+
+# Calculate convex hull for each group
+hulls <- KEGG_MOD.pca.ann.nona %>%
+  group_by(matrix) %>%
+  do(find_hull(.))
+
+# Plot PCA
+kegg_pca = ggplot(KEGG_MOD.pca.ann.nona) +
+  geom_point(aes(x = PC1, y = PC2, shape = habtype_new, colour = matrix, fill = matrix), size = 3) +
+  geom_text_repel(aes(x = PC1, y = PC2, label = shortcode, colour = matrix), show.legend = FALSE, size = 3, max.overlaps = 38) +
+  
+  # Shaded Ellipses
+  stat_ellipse(aes(x = PC1, y = PC2, group = matrix, fill = matrix), 
+               geom = "polygon", alpha = 0.2, level = 0.95) +  # Shaded interior
+  
+  # Ellipse borders
+  stat_ellipse(aes(x = PC1, y = PC2, group = matrix, colour = matrix), 
+               level = 0.95, linetype = 1, size = 0.5) + 
+  
+  scale_fill_manual(values = c("#49B192", "#E17F35")) + 
+  scale_colour_manual(values = c("#49B192", "#E17F35")) +
+  scale_shape_manual(values = c(16, 17)) +  # Circle and triangle
+  
+  theme_minimal() +  # Keep clean background style
+  theme(
+    panel.grid.major = element_line(colour = "gray85"),  
+    panel.grid.minor = element_blank(),  
+    panel.background = element_rect(fill = "white", colour = "gray80"),  
+    legend.key = element_rect(fill = "white", colour = "white")  
+  ) +
+  theme_minimal() +  
+  theme(
+    panel.grid.major = element_line(colour = "white"),  # Light gray gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines for clarity
+    panel.background = element_rect(fill = "grey95", colour = "white"),  # Subtle border
+    legend.key = element_rect(fill = "white", colour = "white")  # White legend background
+  ) +
+  labs(x = x_axis_label, y = y_axis_label, colour = "matrix", shape = "Physiographic group")
+kegg_pca
+```
+
+```{r}
+# Hierarchical clustering on Module data
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+library(factoextra)
+
+# Select the first few PCs for clustering (adjust as needed)
+pca_data <- KEGG_MOD.pca$x[, 1:5]  # Using first 5 PCs
+pca_data=as.data.frame(pca_data)
+pca_data$sample=rownames(pca_data)
+pca_data=left_join(pca_data,metadata,by="sample")
+rownames(pca_data)=pca_data$codehab
+pca_data=pca_data[,1:5]
+
+# Compute Euclidean distance matrix
+dist_matrix <- dist(pca_data, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hc <- hclust(dist_matrix, method = "ward.D2")
+
+# Plot dendrogram
+dend=fviz_dend(hc, 
+          k = 2, 
+          rect = FALSE, 
+          rect_fill = FALSE, 
+          phylo_layout = "layout_as_tree",
+          cex=0.4,
+          rect_border = "black", 
+          k_colors = c("darkred", "darkblue"),  # Assign colors to clusters
+          main = "Hierarchical Clustering Dendrogram") +
+  theme_void() 
+
+# Cut the dendrogram into k clusters
+k <- 2  # Adjust as needed
+clusters <- cutree(hc, k)
+
+# Add cluster labels to PCA data
+KEGG_MOD.pca_df$cluster <- as.factor(clusters)
+KEGG_MOD.pca_df=left_join(KEGG_MOD.pca_df,metadata,by="sample")
+# PCA Scatter plot with clusters
+hierarchical_PCA=ggplot(KEGG_MOD.pca_df, aes(x = PC1, y = PC2, color = cluster, shape = habtype_new)) +
+  geom_point(size = 2) +
+  geom_text_repel(aes(label = habtype_matrix), size = 3, max.overlaps = 6) +
+  stat_ellipse(aes(x = PC1, y = PC2, group = matrix, fill = matrix), geom = "polygon", alpha = 0.2, level = 0.95) +  # Shaded interior
+  
+  # Ellipse borders
+  #stat_ellipse(aes(x = PC1, y = PC2, group = matrix, colour = matrix), 
+  #             level = 0.95, linetype = 1, size = 0.5) + 
+  # Manually set colors for clusters and matrix
+  scale_color_manual(values = c("1" = "darkred", "2" = "darkblue", 
+                                "sediment" = "#49B192", "water" = "#E17F35")) +
+  scale_fill_manual(values = c("sediment" = "#49B192", "water" = "#E17F35")) +
+  theme_minimal() +
+  labs(title = "PCA with Hierarchical Clustering", x = x_axis_label, y = y_axis_label, shape = "Physiographic group")
+```
+
+## Select only modules that are metabolically relevant (Carbon Metabolism, Energy metabolism, Photosynthesis)
+1) Extract scaffold length from fasta scaffolds
+2) Parse the fasta headers
+3) Use total scaffold lenght 
+4) Sum up the scaffold lengths for each sample to get a library size proxy 
+5) Normalize the counts of genes assigned to KEGG Modules by dividing them by the total scaffold length of the corresponding sample
+6) Multiply the resulting values by a fixed constant (e.g., 1,000,000 for RPM - reads per million) for comparability.
+
+# Biogeochemical Modules Analysis
+```{r}
+# Normalisation of annotated genes per sample, dividing by library size:
+# Load samples' library sizes and parse dataset
+library_sizes=data.frame(
+  metric = c("scaffold_length", "contigs_number"),
+  AV9 = c(1744652667, 5306732),
+  AV10 = c(585026681, 936967),
+  AV11 = c(1164917896, 2897594),
+  AV13 = c(2241947005, 8498827),
+  AV14 = c(3959094575, 13924591),
+  AV15 = c(1114019271, 2620786),
+  AV16 = c(5375691240, 19622614),
+  AV17 = c(4009296358, 14514121),
+  AV18 = c(1695542521, 5319147),
+  AV19 = c(2298704296, 7488960),
+  Lago_Ledro_sed = c(3048095597, 11329085),
+  L_Ampola_sed = c(3681682655, 12239934),
+  Mga_Stigol_sedim = c(2843950148, 8147431),
+  Bocca_Giumela_sedim = c(4169808314, 13483611),
+  Mga_Bestana_sed = c(2751851065, 9876177),
+  Mga_tenno_sed = c(2741778004, 9738908),
+  Torb_Lomasona_sed = c(3705460349, 13118777),
+  Lomasona_1_sed = c(2654551295, 9062658),
+  Fiave1_sed = c(3160754077, 11296287),
+  Fiave2_sed = c(2808034748, 8930811),
+  Fiave3_sed = c(3465356755, 11772492),
+  Psso_Duron_sedim = c(3373696073, 11590015),
+  Mga_Stabio_sed = c(3205889221, 10317005),
+  Mga_Movlina_sedim = c(3526282422, 10589704),
+  Mga_Nambi_sedim = c(3319755896, 10032242),
+  L_Nembia_sed = c(2696104667, 8563945),
+  Lago_Valagola_sed = c(2906436241, 9578583),
+  Mga_Cioca_sed = c(2822016618, 9227084),
+  LL_P12 = c(1363032874, 4126147),
+  AV4 = c(4409579754, 15084916),
+  AV12 = c(2853117422, 8306721),
+  Lago_Tenno_sed = c(3463530208, 12223593),
+  AV2 = c(1210088224, 3166080),
+  AV3 = c(5411443480, 17742492),
+  AV5 = c(1028845562, 2720911),
+  AV6 = c(1060805737, 2688242),
+  AV7 = c(1065438987, 3239649),
+  AV8 = c(732310947, 2260273)
+)
+library_sizes=library_sizes[-2,]
+library_sizes= library_sizes %>%
+  pivot_longer(cols = -metric, names_to = "sample", values_to = "library_size") %>% select(-metric)
+
+library_sizes<- library_sizes %>% # match sample order of KEGG Module matrix
+  filter(sample %in% rownames(KEGG_module.t)) %>%
+  arrange(match(sample, rownames(KEGG_module.t)))
+
+# Convert kegg_meta to a numeric matrix for element-wise division
+kegg_meta = KEGG_module.t
+kegg_meta.m <- as.matrix(kegg_meta)
+normalized_kegg_meta <- sweep(kegg_meta.m, 1, library_sizes$library_size, "/")
+constant <- 1e6 # Multiply by a fixed constant (1,000,000 for RPM)
+normalized_kegg_meta <- normalized_kegg_meta * constant
+
+# Convert back to a data frame
+normalized_kegg_meta <- as.data.frame(normalized_kegg_meta)
+
+# Reintroduce metadata
+normalized_kegg_meta$sample <- rownames(KEGG_module.t)
+kegg_meta = left_join(normalized_kegg_meta, metadata, by="sample")
+```
+
+```{r}
+# Load KEGGREST library for KEGG data retrieval
+library(KEGGREST)
+
+# Define a function to get the KEGG module data
+get_module_data <- function(module_id) {
+  photo <- keggFind("module", module_id)
+  photo_path <- keggGet(names(photo)[1])
+  
+  entry_values <- photo_path[[1]]$ENTRY
+  name_values <- photo_path[[1]]$NAME
+  definition_values <- photo_path[[1]]$DEFINITION
+  
+  # Combine into a dataframe
+  return(data.frame(module = entry_values, name = name_values, ko = definition_values, stringsAsFactors = FALSE))}
+
+# List of module IDs and whether to use PATHWAY for the 'name' field
+module_list <- list(
+  # Carbon metabolism
+  list(id = "M00001", name = "Glycolysis (Embden-Meyerhof pathway), glucose => pyruvate"),
+  list(id = "M00002", name = "Glycolysis, core module involving three-carbon compounds"),
+  list(id = "M00003", name = "Gluconeogenesis, oxaloacetate => fructose-6P"),
+  list(id = "M00307", name = "Pyruvate oxidation, pyruvate => acetyl-CoA"),
+  list(id = "M00009", name = "Citrate cycle (TCA cycle, Krebs cycle)"),
+  list(id = "M00010", name = "Citrate cycle, first carbon oxidation, oxaloacetate => 2-oxoglutarate"),
+  list(id = "M00011", name = "Citrate cycle, second carbon oxidation, 2-oxoglutarate => oxaloacetate"),
+  list(id = "M00004", name = "Pentose phosphate pathway (Pentose phosphate cycle)"),
+  list(id = "M00006", name = "Pentose phosphate pathway, oxidative phase, glucose 6P => ribulose 5P"),
+  list(id = "M00007", name = "Pentose phosphate pathway, non-oxidative phase, fructose 6P => ribose 5P"),
+  list(id = "M00580", name = "Pentose phosphate pathway, archaea, fructose 6P => ribose 5P"),
+  list(id = "M00005", name = "PRPP biosynthesis, ribose 5P => PRPP"),
+  list(id = "M00008", name = "Entner-Doudoroff pathway, glucose-6P => glyceraldehyde-3P + pyruvate"),
+  list(id = "M00308", name = "Semi-phosphorylative Entner-Doudoroff pathway, gluconate => glycerate-3P"),
+  list(id = "M00633", name = "Semi-phosphorylative Entner-Doudoroff pathway, gluconate/galactonate => glycerate-3P"),
+  list(id = "M00309", name = "Non-phosphorylative Entner-Doudoroff pathway, gluconate/galactonate => glycerate"),
+
+# Other carbohydrate metabolism
+  list(id = "M00014", name = "Glucuronate pathway (uronate pathway)"),
+  list(id = "M00630", name = "D-Galacturonate degradation (fungi), D-galacturonate => glycerol"),
+  list(id = "M00631", name = "D-Galacturonate degradation (bacteria), D-galacturonate => pyruvate + D-glyceraldehyde 3P"),
+  list(id = "M00061", name = "D-Glucuronate degradation, D-glucuronate => pyruvate + D-glyceraldehyde 3P"),
+  list(id = "M00081", name = "Pectin degradation"),
+  list(id = "M00632", name = "Galactose degradation, Leloir pathway, galactose => alpha-D-glucose-1P"),
+  list(id = "M00552", name = "D-galactonate degradation, De Ley-Doudoroff pathway, D-galactonate => glycerate-3P"),
+  list(id = "M00129", name = "Ascorbate biosynthesis, animals, glucose-1P => ascorbate"),
+  list(id = "M00114", name = "Ascorbate biosynthesis, plants, fructose-6P => ascorbate"),
+  list(id = "M00550", name = "Ascorbate degradation, ascorbate => D-xylulose-5P"),
+  list(id = "M00854", name = "Glycogen biosynthesis, glucose-1P => glycogen/starch"),
+  list(id = "M00855", name = "Glycogen degradation, glycogen => glucose-6P"),
+  list(id = "M00565", name = "Trehalose biosynthesis, D-glucose 1P => trehalose"),
+  list(id = "M00549", name = "Nucleotide sugar biosynthesis, glucose => UDP-glucose"),
+  list(id = "M00554", name = "Nucleotide sugar biosynthesis, galactose => UDP-galactose"),
+  list(id = "M00892", name = "UDP-N-acetyl-D-glucosamine biosynthesis, eukaryotes, glucose => UDP-GlcNAc"),
+  list(id = "M00909", name = "UDP-N-acetyl-D-glucosamine biosynthesis, prokaryotes, glucose => UDP-GlcNAc"),
+  list(id = "M00761", name = "Undecaprenylphosphate alpha-L-Ara4N biosynthesis, UDP-GlcA => undecaprenyl phosphate alpha-L-Ara4N"),
+  list(id = "M00923", name = "UDP-L-FucNAm biosynthesis, UDP-GlcNAc => UDP-L-FucNAm"),
+  list(id = "M00922", name = "CMP-Neu5Ac biosynthesis, UDP-GlcNAc => CMP-Neu5Ac"),
+  list(id = "M00793", name = "dTDP-L-rhamnose biosynthesis, glucose-1P => dTDP-L-Rha"),
+  list(id = "M00012", name = "Glyoxylate cycle"),
+  list(id = "M00373", name = "Ethylmalonyl pathway"),
+  list(id = "M00740", name = "Methylaspartate cycle"),
+  list(id = "M00532", name = "Photorespiration"),
+  list(id = "M00013", name = "Malonate semialdehyde pathway, propanoyl-CoA => acetyl-CoA"),
+  list(id = "M00741", name = "Propanoyl-CoA metabolism, propanoyl-CoA => succinyl-CoA"),
+  list(id = "M00982", name = "Methylcitrate cycle"),
+  list(id = "M00968", name = "Pentose bisphosphate pathway (nucleoside degradation), archaea, nucleoside/NMP => 3-PGA/glycerone phosphate"),
+  list(id = "M00130", name = "Inositol phosphate metabolism, PI=> PIP2 => Ins(1,4,5)P3 => Ins(1,3,4,5)P4"),
+  list(id = "M00131", name = "Inositol phosphate metabolism, Ins(1,3,4,5)P4 => Ins(1,3,4)P3 => myo-inositol"),
+  list(id = "M00132", name = "Inositol phosphate metabolism, Ins(1,3,4)P3 => phytate"),
+
+  # Carbon fixation
+  list(id = "M00165", name = "Reductive pentose phosphate cycle (Calvin cycle) "),
+  list(id = "M00168", name = "CAM (Crassulacean acid metabolism), dark "),
+  list(id = "M00169", name = "CAM (Crassulacean acid metabolism), light"),
+  list(id = "M00172", name = "C4-dicarboxylic acid cycle, NADP - malic enzyme type"),
+  list(id = "M00171", name = "C4-dicarboxylic acid cycle, NAD - malic enzyme type"),
+  list(id = "M00170", name = "C4-dicarboxylic acid cycle, phosphoenolpyruvate carboxykinase type"),
+  list(id = "M00173", name = "Reductive citrate cycle (Arnon-Buchanan cycle)"),
+  list(id = "M00376", name = "3-Hydroxypropionate bi-cycle"),
+  list(id = "M00375", name = "Hydroxypropionate-hydroxybutylate cycle"),
+  list(id = "M00374", name = "Dicarboxylate-hydroxybutyrate cycle"),
+  list(id = "M00377", name = "Reductive acetyl-CoA pathway"),
+  list(id = "M00579", name = "Phosphate acetyltransferase-acetate kinase pathway, acetyl-CoA => acetate "),
+  list(id = "M00620", name = "Incomplete reductive citrate cycle, acetyl-CoA => oxoglutarate"),
+   # Methane metabolism
+  list(id = "M00567", name = "Methanogenesis, CO2 => methane"),
+  list(id = "M00357", name = "Methanogenesis, acetate => methane"),
+  list(id = "M00356", name = "Methanogenesis, methanol => methane"),
+  list(id = "M00563", name = "Methanogenesis, methylamine/dimethylamine/trimethylamine => methane"),
+  list(id = "M00358", name = "Coenzyme M biosynthesis"),
+  list(id = "M00608", name = "2-Oxocarboxylic acid chain extension, 2-oxoglutarate => 2-oxoadipate => 2-oxopimelate => 2-oxosuberate"),
+  list(id = "M00174", name = "Methane oxidation, methanotroph, methane => formaldehyde"),
+  list(id = "M00346", name = "Formaldehyde assimilation, serine pathway"),
+  list(id = "M00345", name = "Formaldehyde assimilation, ribulose monophosphate pathway"),
+  list(id = "M00344", name = "Formaldehyde assimilation, xylulose monophosphate pathway"),
+  list(id = "M00378", name = "F420 biosynthesis, archaea"),
+  list(id = "M00935", name = "Methanofuran biosynthesis"),
+  list(id = "M00422", name = "Acetyl-CoA pathway, CO2 => acetyl-CoA"),
+  # Nitrogen metabolism
+  list(id = "M00175", name = "Nitrogen fixation, nitrogen => ammonia"),
+  list(id = "M00531", name = "Assimilatory nitrate reduction, nitrate => ammonia"),
+  list(id = "M00530", name = "Dissimilatory nitrate reduction, nitrate => ammonia"),
+  list(id = "M00529", name = "Denitrification, nitrate => nitrogen"),
+  list(id = "M00528", name = "Nitrification, ammonia => nitrite"),
+  list(id = "M00804", name = "Complete nitrification, comammox, ammonia => nitrite => nitrate"),
+  list(id = "M00973", name = "Anammox, nitrite + ammonia => nitrogen"),
+  # Sulfur metabolism
+  list(id = "M00987", name = "Assimilatory sulfate reduction, plants, sulfate => H2S"),
+  list(id = "M00176", name = "Assimilatory sulfate reduction, sulfate => H2S"),
+  list(id = "M00596", name = "Dissimilatory sulfate reduction, sulfate => H2S"),
+  list(id = "M00595", name = "Sulfur oxidation, SOX system, thiosulfate => sulfate"),
+  list(id = "M00984", name = "Sulfur oxidation, tetrathionate intermediate (S4I) pathway, thiosulfate => sulfur + sulfate + thiosulfate"),
+  list(id = "M00986", name = "Sulfur reduction, sulfur => sulfide"),
+  list(id = "M00985", name = "Sulfide oxidation, sulfide => sulfur"),
+  # Photosynthesis 
+  list(id = "M00161", name = "Photosystem II"),
+  list(id = "M00163", name = "Photosystem I"),
+  list(id = "M00597", name = "Anoxygenic photosystem II"),
+  list(id = "M00598", name = "Anoxygenic photosystem I")
+)
+
+# Initialize an empty list to store the dataframes
+dataframes <- list()
+
+# Loop through each module and get the data
+for (module in module_list) {
+  df_name <- paste0("photo_path.", module$name)
+  dataframes[[df_name]] <- get_module_data(module$id)
+}
+
+# Combine all the dataframes into one
+photo_path.mod <- do.call(rbind, dataframes)
+
+# View the final combined dataframe
+print(photo_path.mod)
+
+# Here, I select from the complete Module matrix only the modules that are biogeochemical, and I introduce some metadata
+KEGG_pathway.photo <- kegg_meta %>% 
+  select(any_of(str_c(photo_path.mod$module)), matrix,habtype_matrix,shortcode,sample,habtype_new) 
+
+```
+
+```{r}
+## Biogeochemical modules relative abundance calculation (aka proportional adjustment)
+
+# Select only the module columns (excluding metadata)
+module_columns <- setdiff(names(KEGG_pathway.photo), c("matrix", "habtype_matrix", "shortcode", "sample", "habtype_new"))
+
+# Calculate the total module count for each sample (row-wise sum)
+KEGG_pathway.photo$total_modules <- rowSums(KEGG_pathway.photo[, module_columns], na.rm = TRUE)
+
+# Divide each module count by the total module count for that sample
+KEGG_pathway.photo_normalized <- KEGG_pathway.photo
+KEGG_pathway.photo_normalized[, module_columns] <- 
+  sweep(KEGG_pathway.photo[, module_columns], 1, KEGG_pathway.photo$total_modules, "/")
+
+KEGG_pathway.photo_normalized <- KEGG_pathway.photo_normalized %>% select(-total_modules)
+KEGG_pathway.photo=KEGG_pathway.photo_normalized
+```
+
+```{r}
+## Functional analysis comparing sediment vs water
+# Divide df by 'water' and 'sediment'
+KEGG_pathway.photo_w = subset(KEGG_pathway.photo, matrix == "water") 
+KEGG_pathway.photo_w <- KEGG_pathway.photo_w[order(KEGG_pathway.photo_w$shortcode), ] 
+#KEGG_pathway.photo_w <- KEGG_pathway.photo_w[order(KEGG_pathway.photo_w$habtype_new), ]
+KEGG_pathway.photo_w <- KEGG_pathway.photo_w[order(KEGG_pathway.photo_w$habtype_m), ]
+
+KEGG_pathway.photo_s = subset(KEGG_pathway.photo, matrix == "sediment") 
+KEGG_pathway.photo_s <- KEGG_pathway.photo_s[order(KEGG_pathway.photo_s$shortcode), ] 
+#KEGG_pathway.photo_s <- KEGG_pathway.photo_s[order(KEGG_pathway.photo_s$habtype_new), ]
+KEGG_pathway.photo_s <- KEGG_pathway.photo_s[order(KEGG_pathway.photo_s$habtype_m), ]
+
+## Perform Wilcoxon signed rank sum test (compare matrices sed vs water)
+ids <- c("M00001", "M00002", "M00003", "M00307", "M00009", "M00010", "M00011", 
+  "M00004", "M00006", "M00007", "M00580", "M00005", "M00008", "M00308", 
+  "M00633", "M00309", "M00014", "M00630", "M00631", "M00061", "M00081", 
+  "M00632", "M00552", "M00129", "M00114", "M00550", "M00565", "M00549", 
+  "M00554", "M00761", "M00793", "M00012", "M00373", "M00740", "M00532", 
+  "M00013", "M00741", "M00130", "M00131", "M00132", 
+         "M00165", "M00168", "M00169", "M00172", "M00171", "M00170", "M00173", "M00376", 
+          "M00375", "M00374", "M00377", "M00579", "M00620", "M00567", 
+         "M00357", "M00356", "M00563", "M00358", "M00608", "M00174", "M00346", 
+         "M00345", "M00344", "M00378", "M00422", "M00175", "M00531", 
+         "M00530", "M00529", "M00528", "M00804", "M00176", 
+         "M00596", "M00595", "M00161", "M00163", "M00597", "M00598")
+p_values <- c()
+
+# Perform Wilcoxon tests for each module and store p-values
+for (module in ids) {
+  test_result <- wilcox.test(KEGG_pathway.photo_w[[module]], KEGG_pathway.photo_s[[module]], paired = TRUE)
+  p_values <- c(p_values, test_result$p.value)
+}
+
+# Apply Benjamini-Hochberg correction
+adjusted_p_values <- p.adjust(p_values, method = "BH")
+
+# Combine results into a TABLE 
+adj_wilcoxon_results <- data.frame(
+  Module = ids,
+  P_Value = p_values,
+  Adjusted_P_Value = adjusted_p_values
+)
+
+```
+
+```{r}
+## Functional analysis comparing big lakes to small water bodies (L-SLs vs SWB-PBs)
+# Divide df by 'water' and 'sediment'
+KEGG_pathway.photo_lsls = subset(KEGG_pathway.photo, habtype_new == "L-SLs") 
+KEGG_pathway.photo_lsls <- KEGG_pathway.photo_lsls[order(KEGG_pathway.photo_lsls$shortcode), ] 
+#KEGG_pathway.photo_lsls <- KEGG_pathway.photo_lsls[order(KEGG_pathway.photo_lsls$habtype_new), ]
+KEGG_pathway.photo_lsls <- KEGG_pathway.photo_lsls[order(KEGG_pathway.photo_lsls$habtype_m), ]
+
+KEGG_pathway.photo_swbpb = subset(KEGG_pathway.photo, habtype_new == "SWB-PBs") 
+KEGG_pathway.photo_swbpb <- KEGG_pathway.photo_swbpb[order(KEGG_pathway.photo_swbpb$shortcode), ] 
+#KEGG_pathway.photo_swbpb <- KEGG_pathway.photo_swbpb[order(KEGG_pathway.photo_swbpb$habtype_new), ]
+KEGG_pathway.photo_swbpb <- KEGG_pathway.photo_swbpb[order(KEGG_pathway.photo_swbpb$habtype_m), ]
+
+# Perform wilcoxon rank sum test
+ids <- c("M00001", "M00002", "M00003", "M00307", "M00009", "M00010", "M00011", 
+  "M00004", "M00006", "M00007", "M00580", "M00005", "M00008", "M00308", 
+  "M00633", "M00309", "M00014", "M00630", "M00631", "M00061", "M00081", 
+  "M00632", "M00552", "M00129", "M00114", "M00550", "M00565", "M00549", 
+  "M00554", "M00761", "M00793", "M00012", "M00373", "M00740", "M00532", 
+  "M00013", "M00741", "M00130", "M00131", "M00132",
+  "M00165", "M00168", "M00169", "M00172", "M00171", "M00170", "M00173", 
+         "M00376", "M00375", "M00374", "M00377", "M00579", "M00620", "M00567", 
+         "M00357", "M00356", "M00563", "M00358", "M00608", "M00174", "M00346", 
+         "M00345", "M00344", "M00378", "M00422", "M00175", "M00531", 
+         "M00530", "M00529", "M00528", "M00804", "M00176", 
+         "M00596", "M00595", "M00161", "M00163", "M00597", "M00598")
+p_values <- c()
+
+# Perform Wilcoxon tests for each module and store p-values
+for (module in ids) {
+  test_result <- wilcox.test(KEGG_pathway.photo_lsls[[module]], KEGG_pathway.photo_swbpb[[module]], paired = FALSE)
+  p_values <- c(p_values, test_result$p.value)
+}
+
+# Apply Benjamini-Hochberg correction
+adjusted_p_values <- p.adjust(p_values, method = "BH")
+
+# Combine results into a TABLE
+adj_wilcoxon_results <- data.frame(
+  Module = ids,
+  P_Value = p_values,
+  Adjusted_P_Value = adjusted_p_values
+)
+```
+
+

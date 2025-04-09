@@ -1,0 +1,773 @@
+
+```{r setup, include=FALSE}
+# Libraries
+library(ape)
+library(janitor)
+library(ggtree)
+library(tidytree)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(textshape)
+library(purrr)
+library(ggplot2)
+library(ggsci)
+library(devEMF)
+library(colorRamp2)
+library(ggrepel)
+library(KEGGREST)
+library(tibble)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(GGally)
+library(microeco)
+library(file2meco)
+library(nloptr)
+library(lme4)
+library(pbkrtest)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(ComplexHeatmap)
+library(ggplot2)
+library(dplyr)
+library(pheatmap)
+library(patchwork)
+library(devEMF)
+library(ANCOMBC)
+library(tidyverse)
+library(DT)
+```
+
+
+#### Bacteria 
+```{r}
+# Bracken: computes the abundance of species in DNA sequences from a metagenomics sample
+# Load
+mult_B <- mpa2meco("TableS3_Bacteria_Taxonomy.csv", use_level = 'p__', sep=",")
+
+
+# Add variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("MB", "MT", "LT", "TL", "L1", "TF1", "TF2", "TF3","LV", "MC", "LL", "LA", "MST", "BG", "MB", "MT", "TL", "L1", "TF1", "TF2", "TF3", "PD", "MS", "MM", "MN", "LN", "LV", "MC", "LL", "MN", "LN", "LT", "LA", "MM", "PD", "MS", "BG", "MST")
+```
+
+```{r}
+### Prepare PHYLOSEQ object adding new variables
+physeq <- meco2phyloseq(mult_B)
+
+# Create a new column 'habtype_new_m' based on habtype and matrix
+physeq@sam_data[["habtype_new_m"]] <- ifelse(
+  physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "sediment", "swb-pb_s",
+  ifelse(
+    physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "water", "swb-pb_w",
+    ifelse(
+      physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "sediment", "l-sl_s",
+      ifelse(
+        physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "water", "l-sl_w",
+        NA  # Default value if none of the conditions match
+      )
+    )
+  )
+)
+
+# Make new Habitat variable into a factor
+physeq@sam_data[["habtype_new_m"]] = as.factor(physeq@sam_data[["habtype_new_m"]])
+
+```
+
+```{r}
+### Run two ANCOMBC analyses to derive a summary table inclusive of all comparisons
+
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]],ref = "swb-pb_s")
+# Run ANCOMBC
+library(ANCOMBC)
+out1 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+
+res1 = out1$res
+
+res1$taxon=gsub("p__","",res1$taxon)
+res_global1 = out1$res_global
+
+df_habtype = res1 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+df_fig_global1 = df_habtype %>%
+  # Step 1: Join the data frame with the global results
+    dplyr::left_join(res_global1 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_ml-sl_s`=`lfc_habtype_new_ml-sl_s`,
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `SWB-PBs (s) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `SWB-PBs (s) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols =`SWB-PBs (s) - L-SLs (s)`:`SWB-PBs (s) - SWB-PBs (w)`,
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "SWB-PBs (s) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "SWB-PBs (s) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+
+```
+
+```{r}
+# Run ANCOMBC analysis again using another level of the habtype_new_m factor as reference 
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]],ref = "l-sl_w")
+
+# Run ANCOMBC
+library(ANCOMBC)
+out2 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+#out <- ancombc2(data = physeq, tax_level = "Phylum", fix_formula = "matrix", group = "matrix", alpha = 0.001)
+res2 = out2$res
+
+res2$taxon=gsub("p__","",res2$taxon)
+
+res_global2 = out2$res_global
+df_habtype2 = res2 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+# Combine and transform data, add significance and symbol columns
+df_fig_global2 <- df_habtype2 %>%
+  # Step 1: Join the data frame with the global results
+  dplyr::left_join(
+    res_global2 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`,
+    `lfc_habtype_new_ml-sl_s` = `lfc_habtype_new_ml-sl_s`,
+    `lfc_habtype_new_mswb-pb_s` = `lfc_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `L-SLs (w) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    `L-SLs (w) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `L-SLs (w) - SWB-PBs (s)` = round(`lfc_habtype_new_mswb-pb_s`, 2),
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`,
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_s = `q_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols = c(
+      `L-SLs (w) - SWB-PBs (w)`,
+      `L-SLs (w) - L-SLs (s)`,
+      `L-SLs (w) - SWB-PBs (s)`
+    ),
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "L-SLs (w) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      group == "L-SLs (w) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "L-SLs (w) - SWB-PBs (s)" ~ adj_p_swbpb_s,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+```
+
+```{r}
+### MERGE the two analyses into a single results table 
+df_fig_global = rbind(df_fig_global1,df_fig_global2) %>% dplyr::arrange(taxon)
+
+most_abundant_bacterial_phyla = c("Pseudomonadota","Actinomycetota", "Bacteroidota","Verrucomicrobiota","Acidobacteriota","Chloroflexota","Planctomycetota","Myxococcota","Cyanobacteriota","Bacillota_A","Desulfobacterota","Gemmatimonadota","Patescibacteria","Nitrospirota","Methylomirabilota","Bacillota","Desulfobacterota_B","Bacillota_I","Spirochaetota","Myxococcota_A")
+
+df_fig_global <- df_fig_global[df_fig_global$taxon %in% most_abundant_bacterial_phyla, ]
+#names(df_fig_global)=c("phylum","comparison","LFC","p.adj","symbol")
+
+# Plot heatmap
+lo = floor(min(df_fig_global$value))
+up = ceiling(max(df_fig_global$value))
+mid = 0
+
+fig_global = df_fig_global %>%
+  ggplot(aes(x = group, y = taxon, fill = value)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "aquamarine3", high = "darkorange", mid = "white", 
+                       na.value = "white", midpoint = mid, limit = c(lo, up),
+                       name = "Log-Fold Change") +
+  geom_text(aes(group, taxon, label = symbol), color = "black", size = 4) +
+  labs(x = NULL, y = "Phylum", 
+       #title = "Log fold changes for globally significant taxa"
+       ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), axis.title.x = element_text(size = 10), axis.text.x = element_text(angle = 90, colour = "black", size = 8), axis.text.y = element_text(face="italic", size = 8), legend.title = element_text(size = 10))
+fig_global
+```
+
+#### Archaea
+```{r}
+# Bracken data load
+mult_B <- mpa2meco("TableS2_Archaea_Taxonomy.csv", use_level = 's__', sep=",")
+
+# Add variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("MB", "MT", "LT", "TL", "L1", "TF1", "TF2", "TF3","LV", "MC", "LL", "LA", "MST", "BG", "MB", "MT", "TL", "L1", "TF1", "TF2", "TF3", "PD", "MS", "MM", "MN", "LN", "LV", "MC", "LL", "MN", "LN", "LT", "LA", "MM", "PD", "MS", "BG", "MST")
+```
+
+```{r}
+### Prepare PHYLOSEQ object adding new variables
+physeq <- meco2phyloseq(mult_B)
+
+# Create a new column 'habtype_new_m' based on habtype and matrix
+physeq@sam_data[["habtype_new_m"]] <- ifelse(
+  physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "sediment", "swb-pb_s",
+  ifelse(
+    physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "water", "swb-pb_w",
+    ifelse(
+      physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "sediment", "l-sl_s",
+      ifelse(
+        physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "water", "l-sl_w",
+        NA  # Default value if none of the conditions match
+      )
+    )
+  )
+)
+
+# Make new Habitat variable into a factor
+physeq@sam_data[["habtype_new_m"]] = as.factor(physeq@sam_data[["habtype_new_m"]])
+
+```
+
+```{r}
+### Run two analyses to derive a summary table inclusive of all comparisons. Q-values need to be added manually
+
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]],ref = "swb-pb_s")
+# Run ANCOMBC
+library(ANCOMBC)
+out1 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+
+res1 = out1$res
+#res = res[-2,] only for eukaryotes
+
+res1$taxon=gsub("p__","",res1$taxon)
+res_global1 = out1$res_global
+
+df_habtype = res1 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+df_fig_global1 = df_habtype %>%
+  # Step 1: Join the data frame with the global results
+    dplyr::left_join(res_global1 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_ml-sl_s`=`lfc_habtype_new_ml-sl_s`, 
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `SWB-PBs (s) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `SWB-PBs (s) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols =`SWB-PBs (s) - L-SLs (s)`:`SWB-PBs (s) - SWB-PBs (w)`,
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "SWB-PBs (s) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "SWB-PBs (s) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+
+```
+
+
+```{r}
+# Run ANCOMBC again with another level as reference for differential analysis + plot heatmap
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]],ref = "l-sl_w")
+
+# Run ANCOMBC
+library(ANCOMBC)
+out2 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+#out <- ancombc2(data = physeq, tax_level = "Phylum", fix_formula = "matrix", group = "matrix", alpha = 0.001)
+res2 = out2$res
+
+res2$taxon=gsub("p__","",res2$taxon)
+
+res_global2 = out2$res_global
+df_habtype2 = res2 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+# Combine and transform data, add significance and symbol columns
+df_fig_global2 <- df_habtype2 %>%
+  # Step 1: Join the data frame with the global results
+  dplyr::left_join(
+    res_global2 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`,
+    `lfc_habtype_new_ml-sl_s` = `lfc_habtype_new_ml-sl_s`,
+    `lfc_habtype_new_mswb-pb_s` = `lfc_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `L-SLs (w) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    `L-SLs (w) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `L-SLs (w) - SWB-PBs (s)` = round(`lfc_habtype_new_mswb-pb_s`, 2),
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`,
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_s = `q_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols = c(
+      `L-SLs (w) - SWB-PBs (w)`,
+      `L-SLs (w) - L-SLs (s)`,
+      `L-SLs (w) - SWB-PBs (s)`
+    ),
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "L-SLs (w) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      group == "L-SLs (w) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "L-SLs (w) - SWB-PBs (s)" ~ adj_p_swbpb_s,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+
+### MERGE the 2 tables to include all 5 comparisons between groups
+df_fig_global = rbind(df_fig_global1,df_fig_global2) %>% dplyr::arrange(taxon)
+
+lo = floor(min(df_fig_global$value))
+up = ceiling(max(df_fig_global$value))
+mid = 0
+
+fig_global = df_fig_global %>%
+  ggplot(aes(x = group, y = taxon, fill = value)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "aquamarine3", high = "darkorange", mid = "white", 
+                       na.value = "white", midpoint = mid, limit = c(lo, up),
+                       name = "Log-Fold Change") +
+  geom_text(aes(group, taxon, label = symbol), color = "black", size = 4) +
+  labs(x = NULL, y = "Phylum", 
+       #title = "Log fold changes for globally significant taxa"
+       ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), axis.title.x = element_text(size = 10), axis.text.x = element_text(angle = 90, colour = "black"), axis.text.y = element_text(face="italic"), legend.title = element_text(size = 10))
+fig_global
+```
+
+#### Eukaryota
+```{r}
+# Bracken: computes the abundance of species in DNA sequences from a metagenomics sample
+# Load
+mult_B <- mpa2meco("TableS3_Eukarya_Taxonomy.csv", sep = ",", use_level = 's__')
+
+# Add variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12", "Fiave1_sed")
+mult_B$sample_table$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mult_B$sample_table$Sample), 'water', 'sediment'))
+mult_B$sample_table$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mult_B$sample_table$Sample),"L-SLs","SWB-PBs"))
+mult_B$sample_table$shortcode <- labels <- c("TF1",
+"LT",
+"MT",
+"TL",
+"LV",
+"MB",
+"MC",
+"MST",
+"L1",
+"TF3",
+"LA",
+"L1",
+"TF2",
+"MB",
+"LL",
+"MT",
+"BG",
+"TF1",
+"TL",
+"TF2",
+"MS",
+"TF3",
+"LL",
+"LN",
+"MM",
+"LV",
+"PD",
+"MN",
+"MC",
+"LA",
+"MS",
+"PD",
+"BG",
+"MST",
+"LN",
+"MN",
+"LT",
+"MM")
+```
+
+```{r}
+### Prepare PHYLOSEQ object adding new variables
+physeq <- meco2phyloseq(mult_B)
+
+# Create a new column 'habtype_new_m' based on habtype and matrix
+physeq@sam_data[["habtype_new_m"]] <- ifelse(
+  physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "sediment", "swb-pb_s",
+  ifelse(
+    physeq@sam_data[["habtype_new"]] == "SWB-PBs" & physeq@sam_data[["matrix"]] == "water", "swb-pb_w",
+    ifelse(
+      physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "sediment", "l-sl_s",
+      ifelse(
+        physeq@sam_data[["habtype_new"]] == "L-SLs" & physeq@sam_data[["matrix"]] == "water", "l-sl_w",
+        NA  # Default value if none of the conditions match
+      )
+    )
+  )
+)
+
+# Make new Habitat variable into a factor
+physeq@sam_data[["habtype_new_m"]] = as.factor(physeq@sam_data[["habtype_new_m"]])
+
+```
+
+```{r}
+### Run two analyses to derive a summary table inclusive of all comparisons
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]],ref = "swb-pb_s")
+
+# Run ANCOMBC
+library(ANCOMBC)
+out1 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+
+res1 = out1$res
+res1 = res1[-2,] 
+
+res1$taxon=gsub("p__","",res1$taxon)
+res_global1 = out1$res_global
+
+df_habtype = res1 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+df_fig_global1 = df_habtype %>%
+  # Step 1: Join the data frame with the global results
+    dplyr::left_join(res_global1 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_ml-sl_w`=`lfc_habtype_new_ml-sl_s`,
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `SWB-PBs (s) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `SWB-PBs (s) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols =`SWB-PBs (s) - L-SLs (s)`:`SWB-PBs (s) - SWB-PBs (w)`,
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "SWB-PBs (s) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "SWB-PBs (s) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+
+```
+
+```{r}
+# Run ANCOMBC again with another level as reference for differential analysis + plot heatmap
+physeq@sam_data[["habtype_new_m"]] = relevel(physeq@sam_data[["habtype_new_m"]], ref = "l-sl_w")
+physeq@sam_data[["habtype_new_m"]] <- factor(physeq@sam_data[["habtype_new_m"]],
+                                             levels = c("l-sl_w", "l-sl_s", "swb-pb_s", "swb-pb_w"))
+
+levels(physeq@sam_data[["habtype_new_m"]])
+
+# Run ANCOMBC
+library(ANCOMBC)
+out2 <- ancombc2(data = physeq, 
+                tax_level = "Phylum", 
+                fix_formula = "habtype_new_m", 
+                group = "habtype_new_m", 
+                alpha = 0.05, pseudo_sens = TRUE, global = TRUE)
+#out <- ancombc2(data = physeq, tax_level = "Phylum", fix_formula = "matrix", group = "matrix", alpha = 0.001)
+res2 = out2$res
+
+res2$taxon=gsub("p__","",res2$taxon)
+
+res_global2 = out2$res_global
+df_habtype2 = res2 %>%
+    dplyr::select(taxon, contains("habtype")) 
+
+# Combine and transform data, add significance and symbol columns
+df_fig_global2 <- df_habtype2 %>%
+  # Step 1: Join the data frame with the global results
+  dplyr::left_join(
+    res_global2 %>%
+      dplyr::transmute(
+        taxon, 
+        diff = diff_abn, 
+        passed_ss = passed_ss
+      )
+  ) %>%
+  
+  # Step 2: Round and select key log-fold change columns
+  dplyr::mutate(
+    `lfc_habtype_new_mswb-pb_w` = `lfc_habtype_new_mswb-pb_w`,
+    `lfc_habtype_new_ml-sl_s` = `lfc_habtype_new_ml-sl_s`,
+    `lfc_habtype_new_mswb-pb_s` = `lfc_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 3: Transmute to focus on key columns
+  dplyr::transmute(
+    taxon,
+    `L-SLs (w) - SWB-PBs (w)` = round(`lfc_habtype_new_mswb-pb_w`, 2),
+    `L-SLs (w) - L-SLs (s)` = round(`lfc_habtype_new_ml-sl_s`, 2),
+    `L-SLs (w) - SWB-PBs (s)` = round(`lfc_habtype_new_mswb-pb_s`, 2),
+    adj_p_swbpb_w = `q_habtype_new_mswb-pb_w`,
+    adj_p_lsl_s = `q_habtype_new_ml-sl_s`,
+    adj_p_swbpb_s = `q_habtype_new_mswb-pb_s`
+  ) %>%
+  
+  # Step 4: Reshape data with pivot_longer
+  tidyr::pivot_longer(
+    cols = c(
+      `L-SLs (w) - SWB-PBs (w)`,
+      `L-SLs (w) - L-SLs (s)`,
+      `L-SLs (w) - SWB-PBs (s)`
+    ),
+    names_to = "group",
+    values_to = "value"
+  ) %>%
+  
+  # Step 5: Add significance column based on group
+  dplyr::mutate(
+    significance = case_when(
+      group == "L-SLs (w) - SWB-PBs (w)" ~ adj_p_swbpb_w,
+      group == "L-SLs (w) - L-SLs (s)" ~ adj_p_lsl_s,
+      group == "L-SLs (w) - SWB-PBs (s)" ~ adj_p_swbpb_s,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  
+  # Step 6: Add symbol column based on significance
+  dplyr::mutate(
+    symbol = case_when(
+      significance < 0.001 ~ "***",  # Highly significant
+      significance < 0.01 ~ "**",    # Significant
+      significance < 0.05 ~ "*",     # Marginally significant
+      significance >= 0.05 ~ "",   # Not significant
+      TRUE ~ NA_character_           # Default case (if significance is missing)
+    )
+  ) %>%
+  
+  # Step 7: Finalize columns and order by taxon
+  dplyr::select(taxon, group, value, significance, symbol) %>%
+  dplyr::arrange(taxon)
+
+### MERGE the 2 combinations
+df_fig_global = rbind(df_fig_global1,df_fig_global2) %>% dplyr::arrange(taxon)
+names(df_fig_global)=c("phylum","comparison","LFC","p.adj","symbol")
+
+# Plot heatmap
+lo = floor(min(df_fig_global$value))
+up = ceiling(max(df_fig_global$value))
+mid = 0
+
+fig_global = df_fig_global %>%
+  ggplot(aes(x = comparison, y = phylum, fill = LFC)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "aquamarine3", high = "darkorange", mid = "white", 
+                       na.value = "white", midpoint = mid, limit = c(lo, up),
+                       name = "Log-Fold Change") +
+  geom_text(aes(comparison, phylum, label = symbol), color = "black", size = 4) +
+  labs(x = NULL, y = "Phylum", 
+       #title = "Log fold changes for globally significant taxa"
+       ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5), axis.title.x = element_text(size = 10), axis.text.x = element_text(angle = 90, colour = "black"), axis.text.y = element_text(face="italic"), legend.title = element_text(size = 10))
+fig_global
+
+```
+

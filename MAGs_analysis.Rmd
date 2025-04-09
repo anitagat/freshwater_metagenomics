@@ -1,0 +1,544 @@
+```{r}
+# Custom functions 
+# save.emf: saves plots in EMF format
+save.emf = function(plot, name = "plot.path.name.emf", width, height) {
+  # Create the EMF device with specified width and height in inches
+  emf(file = name,width,height)
+  print(plot)
+  dev.off()
+}
+
+replace_dots_except_bin <- function(genome_name) {
+  # Replace all '.' with '_'
+  genome_name <- gsub("\\.", "_", genome_name)
+  genome_name <- gsub("\\-", "_", genome_name)
+  # Restore the dots before and after 'bin'
+  genome_name <- gsub("_bin_", ".bin.", genome_name)
+  genome_name <- gsub("_(?=bin)", ".", genome_name, perl = TRUE)  # Before 'bin'
+  genome_name <- gsub("(?<=bin)_", ".", genome_name, perl = TRUE)  # After 'bin'
+  
+  return(genome_name)
+}
+```
+
+
+```{r}
+# Libraries
+library(ape)
+library(janitor)
+library(ggtree)
+library(tidytree)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(textshape)
+library(purrr)
+library(ggplot2)
+library(ggsci)
+library(devEMF)
+library(colorRamp2)
+library(ggrepel)
+library(KEGGREST)
+library(tibble)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(GGally)
+library(microeco)
+library(file2meco)
+library(nloptr)
+library(lme4)
+library(pbkrtest)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(ComplexHeatmap)
+library(ggplot2)
+library(dplyr)
+library(pheatmap)
+library(patchwork)
+library(devEMF)
+
+```
+```{r}
+# Load metadata
+metadata = read.csv("TableS9_Metadata.csv", sep=',', header=TRUE)
+```
+#### BACTERIA MAG ANALYSIS
+```{r}
+### Data loading 
+mag_taxa_bac = read.table("TableS11_Bacteria_MAG_taxonomy.csv" , header=TRUE, sep='\t')
+mag_data=mag_taxa_bac
+
+# WARNING, the following operations has already been performed on the provided dataframe (TableS11_Bacteria_MAG_taxonomy.csv)
+# Add variables:
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12")     
+mag_data$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mag_data$sample), 'water', 'sediment'))
+mag_data$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mag_data$sample),"L-SLs","SWB-PBs"))
+
+# Separate taxonomy into the 7 levels
+mag_data <- mag_taxa_bac %>% separate(classification,c("Domain","Phylum","Class","Order","Family","Genus","Species"),sep=";") 
+
+# add habitat metadata
+mag_data = left_join(mag_data, metadata, by="sample")
+```
+
+```{r}
+# T-test between genome lenght by matrix (significant)
+mag_data_info=mag_data
+matrix_data <- data.frame(size = mag_data_info$`Genome size (bp)`, matrix = mag_data_info$matrix)
+matrix_data_sediment <- matrix_data$size[matrix_data$matrix == "sediment"]
+matrix_data_water <- matrix_data$size[matrix_data$matrix == "water"]
+
+# Perform the t-test
+t_test_result <- t.test(matrix_data_sediment, matrix_data_water)
+
+# Extract values from the t-test result
+t_value <- round(t_test_result$statistic, 3)
+p_value <- signif(t_test_result$p.value, 3)
+conf_int <- round(t_test_result$conf.int, 0)
+mean_sediment <- round(t_test_result$estimate[1], 0)
+mean_water <- round(t_test_result$estimate[2], 0)
+
+# Create density plot with annotation
+matrix_density = ggplot(matrix_data, aes(x = size, fill = matrix)) +
+  geom_density(alpha = 0.5, linewidth=0) +
+  labs(x = "Genome Size (bp)", y = "Density") + scale_fill_manual(values = c("sediment" = "#49B192", "water" = "#E17F35")) +
+  theme_minimal() + theme(legend.position = "bottom") +
+  # Add t-test result as text annotation
+  annotate("text", x = Inf, y = Inf,label = paste(
+    "t =", t_value, "\n",
+    "p =", p_value, "\n",
+    "CI =", conf_int[1], "-", conf_int[2], "\n",
+    "Mean (Sediment) =", mean_sediment, "\n",
+    "Mean (Water) =", mean_water
+  ),
+  hjust = 1.1, vjust = 1.1, size = 3, color = "black", fontface = "italic") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Rotate x-axis labels
+        axis.text.y = element_text(size = 12),
+        axis.title.x = element_text(size = 14),  # Adjust size of x-axis label
+        axis.title.y = element_text(size = 14))
+matrix_density
+```
+
+```{r}
+# Completeness and Contamination analysis
+#Create the dataframe with required columns
+df <- data.frame(
+  Genome = mag_data_info$user_genome,
+  Completeness = mag_data_info$Completeness,
+  Contamination = mag_data_info$Contamination,
+  Phylum = mag_data_info$Phylum,
+  Matrix = mag_data_info$matrix
+)
+
+# Load necessary libraries
+library(ggplot2)
+library(ggExtra)
+
+# Calculate the quality score
+df <- df %>%
+  mutate(Quality = Completeness - 5 * Contamination)
+
+# Create a scatterplot with Completeness vs Contamination, colored by Quality and Phylum
+scatter_plot <- ggplot(df, aes(x = Completeness, y = Contamination, color = Matrix)) +
+  geom_point(size = 2, alpha = 0.8) +  # Adjust point size and transparency 
+  scale_color_manual(values = c("sediment" = "#49B192", "water" = "#E17F35"))+
+  #scale_color_gradient2(low = "blue", mid = "lightblue", high = "red", midpoint = 50) +  # Color gradient based on quality
+  labs(
+    x = "Completeness (%)",
+    y = "Contamination (%)",
+    color = "Matrix"
+  ) +
+  theme_minimal() +  # Clean theme for the plot
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14)
+  )
+scatter_plot
+high_quality_MAGs=subset(df, Contamination < 5.00 & Completeness > 90.0)
+```
+
+```{r}
+# Analysis of Assigned vs Unassigned species level bins
+mag_data_info$assignment = "NA"
+mag_data_info[mag_data_info$Species != "s__",]$assignment = "known Species"
+mag_data_info[mag_data_info$Species == "s__",]$assignment = "unknown Species"
+
+mag_data_info$assignment = as.factor(mag_data_info$assignment)
+
+phyla_SGB <- mag_data_info %>%
+  group_by(Phylum, assignment, matrix, habtype_new) %>%
+  summarise(Count = n(), .groups='drop')
+
+phyla_SGB = phyla_SGB %>%
+  complete(Phylum, assignment, habtype_new, matrix, fill = list(Count = 0)) 
+phyla_SGB$Phylum = gsub("p__","", phyla_SGB$Phylum)
+
+assignment_plot = ggplot(phyla_SGB, aes(x = assignment, y = Phylum, fill = Count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +  # Customize color scale
+  geom_text(aes(label = Count), color="black") +
+  labs(y = "Phylum", fill = "MAG Count") +  # Add axis labels
+  theme_classic2() +   # Clean theme
+  theme(axis.text.x = element_text(angle = 20, hjust = 1,size = 11), legend.position = "bottom", axis.text.y = element_text(size = 11, face = "italic"), axis.title.x = element_blank())+ facet_grid(habtype_new~matrix) 
+assignment_plot
+length(mag_data_info$assignment[mag_data_info$assignment=="uSGB"])
+```
+
+```{r}
+# Phylogenetic Tree
+library(ape)
+library(dplyr)
+library(tibble)
+
+tree <- read.tree("bacteria_phylogenetic_tree.newick") # from Zenodo repo: 10.5281/zenodo.15111114
+tree.treedata <- as.treedata(tree)
+
+tip_labels <- tree.treedata@phylo$tip.label
+tip_data <- data.frame(user_genome = tip_labels)
+tip_data$user_genome = replace_dots_except_bin(tip_data$user_genome)
+tip_data$user_genome = gsub('_fa', '', tip_data$user_genome)
+tree.treedata@phylo$tip.label <- tip_data$user_genome
+
+tree <- tree.treedata@phylo 
+p <- ggtree(tree) 
+tree_data <- p$data
+
+# taxonomy 
+taxonomy = mag_data_info[,c(1:8)]
+taxonomy$user_genome = replace_dots_except_bin(taxonomy$user_genome)
+
+merged_data <- left_join(tip_data, taxonomy, by = "user_genome")
+merged_data_tibble <- as_tibble(merged_data)
+
+tree_data_merged <- left_join(tree_data, merged_data_tibble, by = c("label" = "user_genome"))
+
+tree_data_merged$Phylum=gsub("p__","",tree_data_merged$Phylum)
+p <- ggtree(tree) %<+% tree_data_merged +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phylum") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  theme(legend.position = "left", legend.text = element_text(size = 16, face = "italic"))
+print(p)
+```
+
+```{r}
+# Containment analysis with MASH SCREEN
+containment <- read.table("TableS13_Containment.tsv", sep='\t', header = TRUE)
+
+# Merge with taxonomic information (mag_data_info)
+names(containment)[1]="user_genome" 
+containment$user_genome=replace_dots_except_bin(containment$user_genome)
+containment$user_genome= gsub("_fa","",containment$user_genome)
+mag_data_info$user_genome=replace_dots_except_bin(mag_data_info$user_genome)
+
+containment_taxonomy = left_join(containment, mag_data_info, by="user_genome")
+containment_taxonomy = na.omit(containment_taxonomy)
+
+# Create matrix for heatmap
+containment_taxonomy.m = as.matrix(containment_taxonomy[,2:39])
+containment_taxonomy.m.log = log2(containment_taxonomy.m)
+containment_taxonomy.m.log[containment_taxonomy.m.log == -Inf] <- 0  # Replace -Inf with 0
+
+# Create tree object
+tree <- tree.treedata@phylo
+
+# Reorder containment_taxonomy.m.log to match the tree's tip labels
+rownames(containment_taxonomy.m.log) <- containment_taxonomy$user_genome
+
+#ordering other plots by tree (y)
+tree_data_merged.o = tree_data_merged[order(tree_data_merged$y),]
+tree_data_merged.o = na.omit(tree_data_merged.o)
+mag_tree_order = tree_data_merged.o$label
+
+metadata_reordered <- metadata %>%
+  arrange(matrix, habtype_new) 
+
+containment_taxonomy_summary <- containment_taxonomy.m.log[mag_tree_order, metadata_reordered$sample]
+#containment_taxonomy_summary <- containment_taxonomy.m[mag_tree_order, metadata_reordered$sample]
+
+# 1. Plot the phylogenetic tree using ggtree
+p <- ggtree(tree, layout = "dendrogram", ladderize = TRUE, hang = 0, branch.length = "none", ) %<+% tree_data_merged +
+  geom_tippoint(aes(color = Phylum), size = 1) + geom_rootedge(rootedge = 0.1) + theme(legend.position = "right")
+
+# 2. Combine tree with the heatmap using gheatmap
+heatmap_tree = gheatmap(p, containment_taxonomy_summary, 
+         colnames = TRUE,
+         colnames_angle = 0, 
+         colnames_position = "bottom",
+         low = "white",
+        high = "blue", 
+        custom_column_labels = metadata_reordered$shortcode,
+         offset = 0.02, font.size =2, hjust = 1) + theme(legend.position = "right", axis.title.x = element_text(size = 14))
+heatmap_tree
+```
+
+```{r}
+# Visualization of Genome size and Quality data of MAGs with phylogenetic tree
+names=tibble(user_genome2=tree.treedata@phylo$tip.label)
+mag_data_info$user_genome2 = replace_dots_except_bin(mag_data_info$user_genome)
+quality <- names %>% left_join(mag_data_info) # %>% select(-Genome)
+
+#ordering other plots by tree (y)
+tree_data_merged.o = tree_data_merged[order(tree_data_merged$y),]
+tree_data_merged.o = na.omit(tree_data_merged.o)
+mag_tree_order = tree_data_merged.o$label
+quality <- quality %>%
+  arrange(match(user_genome2, mag_tree_order))
+
+# Plot faceted tree
+face <- ggtree(tree)  %<+% tree_data_merged.o +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phyla") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  geom_facet(panel="Genome Size",data=quality,aes(x=`Genome size (bp)`,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  #geom_facet(panel="Nr. predicted genes",data=quality,aes(x=`predicted genes`,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  vexpand(.1,-1)+ 
+  theme_pubclean()+
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 30, size = 8)) 
+
+genome_size_tree = facet_widths(face, widths = c(2.5,4,2))
+
+
+face_qualitystats <- ggtree(tree)  %<+% tree_data_merged.o +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phyla") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  geom_facet(panel="Coverage",data=quality,aes(x=coverage),geom = geom_col, orientation = 'y') +
+  geom_facet(panel="Nr. of contigs",data=quality,aes(x=contigs,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  geom_facet(panel="N50 (contigs)",data=quality,aes(x=`N50 (contigs)`,fill=quality$Phylum),geom = geom_col, orientation = 'y')+
+  geom_facet(panel="Base ambiguity",data=quality,aes(x=`ambiguous bases`,fill=quality$Phylum),geom = geom_col, orientation = 'y')+
+       vexpand(.1,-1)+  theme_pubclean()+
+  theme(legend.position = "none", axis.text.x = element_text(angle = 30, size = 8)) 
+ 
+tree_contig_plots = facet_widths(face_qualitystats, widths = c(3,2.5,2.5,3))
+
+```
+
+```{r}
+# Plot of de-replicated MAGs found in each habitat
+phyla_habitat <- mag_data %>%
+  group_by(Phylum, habtype_new, matrix) %>%
+  summarise(Count = n(), .groups='drop')
+
+#phyla_habitat = phyla_habitat %>%
+#  complete(Phylum, habtype_new, fill = list(Count = 0)) 
+
+habtype_mag= ggplot(phyla_habitat, aes(x = Phylum, y = habtype_new, fill = Count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +  # Customize color scale
+  geom_text(aes(label = Count), color="black") +
+  labs(x = "Phylum", y = " ", fill = "MAG Count") +  # Add axis labels
+  theme_classic2() +   # Clean theme
+  theme(axis.text.x = element_text(angle = 45, size=14, hjust = 1), legend.position = "right",
+        axis.text.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),  # Adjust size of x-axis label
+        axis.title.y = element_text(size = 14)) + 
+  facet_wrap(~ matrix) 
+habtype_mag
+```
+
+#### ARCHAEA MAG ANALYSIS
+
+```{r}
+### Data loading 
+mag_taxa_arc = read.table("TableS12_Archaea_MAG_taxonomy.csv", header=TRUE, sep=',')
+mag_data = mag_taxa_arc
+mag_data_info=mag_data
+
+# # WARNING, the following operations has already been performed on the provided dataframe (TableS11_Bacteria_MAG_taxonomy.csv)
+# Add HABITAT variables
+water_samples <- c('AV2', 'AV3', 'AV4', 'AV5', 'AV6', 'AV7', 'AV8', 'AV9', 'AV10', 'AV11', 
+                   'AV12', 'AV13', 'AV14', 'AV15', 'AV16', 'AV17', 'AV18', 'AV19','LL_P12')
+lakes = c("AV2","AV5","AV8","AV11","AV12","AV15","AV18","Lago_Ledro_sed","L_Ampola_sed","Mga_Stigol_sedim","Lago_Tenno_sed","Psso_Duron_sedim","L_Nembia_sed","Lago_Valagola_sed","LL_P12")     
+#mag_data$matrix <- as.factor(ifelse(grepl(paste(water_samples, collapse = "|"), mag_data$sample), 'water', 'sediment'))
+#mag_data$habtype_new <- as.factor(ifelse(grepl(paste(lakes, collapse = "|"), mag_data$sample),"L-SLs","SWB-PBs"))
+
+mag_data <- mag_data %>% separate(classification,c("Domain","Phylum","Class","Order","Family","Genus","Species"),sep=";") 
+
+
+# add habitat info
+mag_data$user_genome2 = replace_dots_except_bin(mag_data$user_genome)
+mag_data = left_join(mag_data, metadata, by="sample")
+```
+
+```{r}
+# Phylogenetic Tree
+tree <- read.tree("archaea_phylogenetic_tree.newick") # from Zenodo repo: 10.5281/zenodo.15111114
+tree.treedata <- as.treedata(tree)
+
+tip_labels <- tree.treedata@phylo$tip.label
+tip_data <- data.frame(user_genome = tip_labels)
+tip_data$user_genome = replace_dots_except_bin(tip_data$user_genome)
+tip_data$user_genome = gsub('_fa', '', tip_data$user_genome)
+tree.treedata@phylo$tip.label <- tip_data$user_genome
+
+tree <- tree.treedata@phylo 
+p <- ggtree(tree) 
+tree_data <- p$data
+
+# taxonomy 
+taxonomy = mag_data[,c(1:8)]
+taxonomy$user_genome = replace_dots_except_bin(taxonomy$user_genome)
+
+merged_data <- left_join(tip_data, taxonomy, by = "user_genome")
+merged_data_tibble <- as_tibble(merged_data)
+
+tree_data_merged <- left_join(tree_data, merged_data_tibble, by = c("label" = "user_genome"))
+tree_data_merged$Phylum=gsub("p__","",tree_data_merged$Phylum)
+p <- ggtree(tree) %<+% tree_data_merged +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phylum") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  theme(legend.position = "right", legend.text = element_text(size=12,face="italic"))
+print(p)
+```
+
+```{r}
+# Plots with Genome size and Quality data of MAGs ordered by the phylogenetic tree
+names=tibble(user_genome=tree.treedata@phylo$tip.label)
+mag_data_info$user_genome = replace_dots_except_bin(mag_data_info$user_genome)
+quality <- names %>% left_join(mag_data_info) # %>% select(-Genome)
+
+#ordering MAGs in other plots using the tree
+tree_data_merged.o = tree_data_merged[order(tree_data_merged$y),]
+tree_data_merged.o = na.omit(tree_data_merged.o)
+mag_tree_order = tree_data_merged.o$label
+quality <- quality %>%
+  arrange(match(user_genome, mag_tree_order))
+tree_data_merged.o$Phylum=gsub("p__","",tree_data_merged.o$Phylum)
+
+# Faceted plot with Genomes sizes ordered with phylogenetic tree
+face <- ggtree(tree)  %<+% tree_data_merged.o +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phylum") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  geom_facet(panel="Genome.Size",data=quality,aes(x=Genome.size..bp.,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  #geom_facet(panel="Nr. predicted genes",data=quality,aes(x=`predicted genes`,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  vexpand(.1,-1)+ 
+  theme_pubclean()+
+  theme(legend.position = "right", axis.text.x = element_text(angle = 30, size = 8), legend.text = element_text(face = "italic")) 
+
+genome_size_tree = facet_widths(face, widths = c(2.5,4,2))
+
+# Faceted quaity plots with phylogenetic tree
+face_qualitystats <- ggtree(tree)  %<+% tree_data_merged.o +
+  geom_tippoint(aes(color = Phylum), size = 1) +
+  scale_color_discrete(name = "Phylum") +
+  #geom_tiplab(aes(label = assignment), size = 2.5) +
+  geom_rootedge(rootedge = 0.1) +
+  geom_facet(panel="Coverage",data=quality,aes(x=coverage),geom = geom_col, orientation = 'y') +
+  geom_facet(panel="Nr. of contigs",data=quality,aes(x=contigs,fill=quality$Phylum),geom = geom_col, orientation = 'y') +
+  geom_facet(panel="N50 (contigs)",data=quality,aes(x=N50..contigs.,fill=quality$Phylum),geom = geom_col, orientation = 'y')+
+  geom_facet(panel="Base ambiguity",data=quality,aes(x=ambiguous.bases,fill=quality$Phylum),geom = geom_col, orientation = 'y')+
+       vexpand(.1,-1)+  theme_pubclean() +
+  theme(legend.position = "right", axis.text.x = element_text(angle = 30, size = 8), legend.text = element_text(face = "italic")) 
+ 
+tree_contig_plots = facet_widths(face_qualitystats, widths = c(3,2.5,2.5,3))
+tree_contig_plots
+```
+
+```{r}
+# Visualization of Assigned vs Unassigned MAGs at the species level
+mag_data_info$assignment = "NA"
+mag_data_info[mag_data_info$Species != "s__",]$assignment = "known Species"
+mag_data_info[mag_data_info$Species == "s__",]$assignment = "unknown Species"
+
+mag_data_info$assignment = as.factor(mag_data_info$assignment)
+mag_data_info=left_join(mag_data_info, metadata, by="sample")
+phyla_SGB <- mag_data_info %>%
+  group_by(Phylum, assignment, matrix,habtype_new) %>%
+  summarise(Count = n(), .groups='drop')
+
+phyla_SGB = phyla_SGB %>%
+  complete(Phylum, assignment, matrix,habtype_new, fill = list(Count = 0)) 
+phyla_SGB$Phylum = gsub("p__","",phyla_SGB$Phylum)
+assignment_plot = ggplot(phyla_SGB, aes(x = assignment, y = Phylum, fill = Count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +  # Customize color scale
+  geom_text(aes(label = Count), color="black") +
+  labs(x = "", y = "Phylum", fill = "MAG Count") +  # Add axis labels
+  theme_classic2() +   # Clean theme
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, size = 12), legend.position = "bottom", axis.text.y = element_text(size = 12,face="italic"), axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14), ) + facet_grid(habtype_new ~ matrix)
+assignment_plot
+```
+
+```{r}
+### Analysis of Completeness and Contamination
+
+#Create the starting dataframe 
+df <- data.frame(
+  Genome = mag_data_info$user_genome,
+  Completeness = mag_data_info$Completeness,
+  Contamination = mag_data_info$Contamination,
+  Phylum = mag_data_info$Phylum,
+  Matrix = mag_data_info$matrix
+)
+
+# Step 2: Group by Phylum and calculate the mean of Completeness and Contamination
+df_grouped <- df %>%
+  group_by(Phylum) %>%
+  summarise(`Mean Completeness` = mean(Completeness), 
+            `Mean Contamination` = mean(Contamination),
+            Count = n())
+
+# Append 'n=' count to Phylum names
+df_grouped <- df_grouped %>%
+  mutate(Phylum_with_n = paste0(Phylum, " (n=", Count, ")"))
+
+# Reshape the data to wide format for heatmap
+df_wide <- df_grouped %>%
+  select(Phylum_with_n, `Mean Completeness`, `Mean Contamination`) %>%  # Select the relevant columns
+  gather(key = "Metric", value = "Percentage", `Mean Completeness`, `Mean Contamination`) %>%
+  spread(key = Metric, value = Percentage)
+
+# Set row names to Phylum_with_n and convert to a matrix for pheatmap
+df_wide_matrix <- as.matrix(df_wide[, -1])  # Exclude the Phylum_with_n column for numeric matrix
+rownames(df_wide_matrix) <- df_wide$Phylum_with_n  # Use Phylum_with_n for row labels
+
+# Generate the heatmap using pheatmap
+completeness_contamination_heatmap = pheatmap(
+  df_wide_matrix,
+  cluster_rows = FALSE,   # Do not cluster rows (optional)
+  cluster_cols = FALSE,   # Do not cluster columns
+  display_numbers = TRUE, # Show mean values on heatmap
+  labels_row = rownames(df_wide_matrix)  # Use Phylum_with_n for y-axis labels
+)
+
+## Plot a Scatter Plot of Completeness and Contamination 
+# Step 1: Calculate the quality
+df <- df %>%
+  mutate(Quality = Completeness - 5 * Contamination)
+
+# Step 2: Create a scatterplot with Completeness vs Contamination, colored by Quality and Phylum
+scatter_plot <- ggplot(df, aes(x = Completeness, y = Contamination, color = Quality)) +
+  geom_point(size = 2, alpha = 0.8) +  # Adjust point size and transparency
+  scale_color_gradient2(low = "blue", mid = "lightblue", high = "red", midpoint = 50) +  # Color gradient based on quality
+  labs(
+    x = "Completeness (%)",
+    y = "Contamination (%)",
+    color = "Quality"
+  ) +
+  theme_minimal() +  # Clean theme for the plot
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+scatter_plot
+
+# Find high quality MAGs
+high_quality_MAGs=subset(df, Contamination < 5.00 & Completeness > 90.0)
+```
+

@@ -1,10 +1,10 @@
-# Metagenomics identifies distinct functional and taxonomic profiles between freshwaters and associated sediments in alpine habitats
+# Taxonomic and functional diversity of microbiomes from underexplored alpine freshwater habitats
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15111114.svg)](https://doi.org/10.5281/zenodo.15111114)
 
-This repository contains the R scripts and the data used for the taxonomic and functional analysis of metagenomic datasets from the Alpi Ledrensi e Judicaria, UNESCO Biosphere Reserve (Italian Northeastern Alps), for the study "Taxonomic and functional diversity of microbiomes from underexplored alpine freshwater habitats", currently under consideration for publication. The authors of this manuscript are A. Gattei, S. Vettorazzo, M. Pindo, N. Salmaso, P. Manghi, S. Larsen, C. Donati. The scripts here were written and uploaded by A. Gattei.
+This repository contains the R scripts and the data used for the taxonomic and functional analysis of metagenomic datasets from the Alpi Ledrensi e Judicaria, UNESCO Biosphere Reserve (Italian Northeastern Alps), for the study "Metagenomics identifies distinct functional and taxonomic profiles between freshwaters and associated sediments in alpine habitats", currently under consideration for publication. The authors of this manuscript are A. Gattei, S. Vettorazzo, M. Pindo, N. Salmaso, P. Manghi, S. Larsen, C. Donati. The scripts here were written and uploaded by A. Gattei.
 
-The R scripts contain the code used for figure creation and data analysis. 
+The R scripts contain the code used for creating figures and performing data analysis. 
 
 The script ```ANCOMBC_analysis.Rmd``` contains the code for the analyses shown in Figure 1 of the manuscript. 
 ```Taxonomic_analysis.Rmd``` contains the code for the analyses shown in Figure 2 and Supplementary Figures 2-4.

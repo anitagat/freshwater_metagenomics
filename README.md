@@ -1,4 +1,4 @@
-# Taxonomic and functional diversity of microbiomes from underexplored alpine freshwater habitats
+# Metagenomics identifies distinct functional and taxonomic profiles between freshwaters and associated sediments in alpine habitats
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15111114.svg)](https://doi.org/10.5281/zenodo.15111114)
 
